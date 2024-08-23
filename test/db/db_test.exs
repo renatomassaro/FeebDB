@@ -63,6 +63,38 @@ defmodule Feeb.DBTest do
       DB.commit()
     end
 
+    test "supports multiple contexts in the same process" do
+      {:ok, test_shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, test_shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, raw_shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:raw)
+
+      # We can start many different BEGIN EXCLUSIVE connections in the same (Erlang) process!
+      # Note they are all different SQLite databases, which is why we don't get a :busy error.
+      DB.begin(:test, test_shard_1, :write)
+      DB.begin(:test, test_shard_2, :write)
+      DB.begin(:raw, raw_shard_1, :write)
+
+      local_state = Process.get(:feebdb_state)
+      assert {_, test_entry_1} = Enum.find(local_state, fn {k, _} -> k == {:test, test_shard_1} end)
+      assert {_, test_entry_2} = Enum.find(local_state, fn {k, _} -> k == {:test, test_shard_2} end)
+      assert {_, raw_entry_1} = Enum.find(local_state, fn {k, _} -> k == {:raw, raw_shard_1} end)
+
+      # Each entry has the correct context and shard ID
+      assert test_entry_1.context == :test
+      assert test_entry_1.shard_id == test_shard_1
+      assert test_entry_2.context == :test
+      assert test_entry_2.shard_id == test_shard_2
+      assert raw_entry_1.context == :raw
+      assert raw_entry_1.shard_id == raw_shard_1
+
+      # Each one has a different Manager / Repo PID (they are different databases, after all)
+      refute test_entry_1.manager_pid == test_entry_2.manager_pid
+      refute test_entry_2.manager_pid == raw_entry_1.manager_pid
+      refute test_entry_1.repo_pid == test_entry_2.repo_pid
+      refute test_entry_2.repo_pid == raw_entry_1.repo_pid
+    end
+
+    @tag capture_log: true
     test "fails on parallel calls", %{shard_id: shard_id} do
       # Write
       assert :ok == DB.begin(@context, shard_id, :write)
