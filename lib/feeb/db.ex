@@ -5,14 +5,56 @@ defmodule Feeb.DB do
   """
 
   require Logger
-  alias Feeb.DB.{Query, Repo, Schema}
+  alias Feeb.DB.{LocalState, Query, Repo, Schema}
 
+  ##################################################################################################
+  # Transaction management
+  ##################################################################################################
+
+  @doc """
+  Starts a transaction.
+
+  It will fetch (or create) the Repo.Manager for the corresponding {context, shard_id}, and it will
+  also fetch the Repo connection (upon availability; blocking). Once returned, the caller process
+  can perform requests against the shard.
+
+  If `access_type` is `:env`, skip the set up process described above and rely on Context (Process
+  state) instead.
+  """
   def begin(context, shard_id, access_type, transaction_type \\ :exclusive) do
     # We can't BEGIN EXCLUSIVE in a read-only database
     txn_type = if(access_type == :read, do: :deferred, else: transaction_type)
     setup_env(context, shard_id, access_type)
     :ok = GenServer.call(get_pid!(), {:begin, txn_type})
   end
+
+  @doc """
+  Commits a transaction.
+
+  It will also release the lock in the Repo connection, allowing other processes to grab it.
+  """
+  def commit do
+    :ok = GenServer.call(get_pid!(), {:commit})
+    # TODO: Close via repomanager
+    # :ok = GenServer.call(get_pid!(), {:close})
+    delete_env()
+    :ok
+  end
+
+  @doc """
+  Rolls back a transaction.
+
+  It will also release the lock in the Repo connection, allowing other processes to grab it.
+  """
+  def rollback do
+    :ok = GenServer.call(get_pid!(), {:rollback})
+    delete_env()
+    :ok
+  end
+
+  ##################################################################################################
+  # Queries
+  ##################################################################################################
 
   def raw(sql, bindings \\ []) do
     GenServer.call(get_pid!(), {:raw, sql, bindings})
@@ -167,27 +209,9 @@ defmodule Feeb.DB do
     r
   end
 
-  def rollback do
-    :ok = GenServer.call(get_pid!(), {:rollback})
-    delete_env()
-    :ok
-  end
-
-  def commit do
-    :ok = GenServer.call(get_pid!(), {:commit})
-    # TODO: Close via repomanager
-    # :ok = GenServer.call(get_pid!(), {:close})
-    delete_env()
-    :ok
-  end
-
-  def assert_env! do
-    get_pid!()
-    get_manager_pid!()
-    get_context!()
-  end
-
-  # def has_env?, do: Process.get(:repo_pid, false) && true
+  ##################################################################################################
+  # Private
+  ##################################################################################################
 
   defp setup_env(context, shard_id, type) when type in [:write, :read] do
     {:ok, manager_pid} = Repo.Manager.Registry.fetch_or_create(context, shard_id)
@@ -195,44 +219,23 @@ defmodule Feeb.DB do
     # TODO: Handle busy
     {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type)
 
-    Process.put(:db_context, context)
-    Process.put(:manager_pid, manager_pid)
-    Process.put(:repo_pid, repo_pid)
+    LocalState.add_entry(context, shard_id, {manager_pid, repo_pid, type})
+    LocalState.set_current_context(context, shard_id)
   end
 
   defp delete_env do
-    repo_pid = get_pid!()
-    manager_pid = get_manager_pid!()
-    :ok = Repo.Manager.release_connection(manager_pid, repo_pid)
-    Process.delete(:repo_pid)
-    Process.delete(:manager_pid)
-    Process.delete(:db_context)
+    state = LocalState.get_current_context!()
+    :ok = Repo.Manager.release_connection(state.manager_pid, state.repo_pid)
+    LocalState.remove_entry(state.context, state.shard_id)
+    LocalState.unset_current_context()
   end
 
   defp get_pid! do
-    case Process.get(:repo_pid) do
-      pid when is_pid(pid) ->
-        pid
-
-      nil ->
-        Logger.error("DB env not set up for #{inspect(self())}")
-        raise "DB env not set up for #{inspect(self())}"
-    end
-  end
-
-  defp get_manager_pid! do
-    pid = Process.get(:manager_pid)
-    true = is_pid(pid)
-    pid
+    LocalState.get_current_context!().repo_pid
   end
 
   defp get_context! do
-    context = Process.get(:db_context)
-
-    if is_nil(context),
-      do: raise("Context for Feeb.DB not set")
-
-    context
+    LocalState.get_current_context!().context
   end
 
   defp get_bindings(query_id, struct) do

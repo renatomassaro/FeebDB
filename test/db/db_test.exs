@@ -1,18 +1,19 @@
 defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
+  alias Feeb.DB.LocalState
 
   @context :test
-  @process_keys [:repo_pid, :manager_pid]
 
   describe "begin/3" do
     test "initiates a write transaction", %{shard_id: shard_id, db: db} do
       assert :ok == DB.begin(@context, shard_id, :write)
 
-      # The environment was set up:
-      assert_proc_state_exists()
-      state = get_proc_state()
-
+      # The environment was set up
+      state = LocalState.get_current_context!()
+      assert state.context == @context
+      assert state.shard_id == shard_id
+      assert state.access_type == :write
       assert Process.alive?(state.manager_pid)
       assert Process.alive?(state.repo_pid)
 
@@ -40,8 +41,10 @@ defmodule Feeb.DBTest do
       assert :ok == DB.begin(@context, shard_id, :read)
 
       # The environment was set up:
-      assert_proc_state_exists()
-      state = get_proc_state()
+      state = LocalState.get_current_context!()
+      assert state.context == @context
+      assert state.shard_id == shard_id
+      assert state.access_type == :read
 
       # Manager has correct data
       m_state = :sys.get_state(state.manager_pid)
@@ -76,10 +79,14 @@ defmodule Feeb.DBTest do
     test "finishes a transaction", %{shard_id: shard_id} do
       # First we start a transaction
       assert :ok == DB.begin(@context, shard_id, :write)
-      assert_proc_state_exists()
+
+      # LocalState exists
+      state = LocalState.get_current_context!()
+      assert state.context == @context
+      assert state.shard_id == shard_id
+      assert state.access_type == :write
 
       # Naturally repo and manager are alive
-      state = get_proc_state()
       assert Process.alive?(state.manager_pid)
       assert Process.alive?(state.repo_pid)
 
@@ -87,7 +94,13 @@ defmodule Feeb.DBTest do
       assert :ok == DB.commit()
 
       # Corresponding environment no longer exists
-      refute_proc_state_exists()
+      assert_raise RuntimeError, fn ->
+        LocalState.get_current_context!()
+      end
+
+      # More specifically, we can assert the state was removed from internal variables
+      refute Process.get(:feebdb_current_context)
+      assert Process.get(:feebdb_state) == %{}
 
       # Repo and Manager are still alive after the transaction
       assert Process.alive?(state.manager_pid)
@@ -131,19 +144,5 @@ defmodule Feeb.DBTest do
         DB.one({:friends, :get_all})
       end
     end
-  end
-
-  defp get_proc_state do
-    @process_keys
-    |> Enum.map(fn key -> {key, Process.get(key)} end)
-    |> Map.new()
-  end
-
-  defp assert_proc_state_exists do
-    Enum.each(@process_keys, fn key -> assert Process.get(key) end)
-  end
-
-  defp refute_proc_state_exists do
-    Enum.each(@process_keys, fn key -> refute Process.get(key) end)
   end
 end
