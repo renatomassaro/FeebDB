@@ -2,6 +2,7 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
+  alias Sample.Post
 
   @context :test
 
@@ -104,6 +105,56 @@ defmodule Feeb.DBTest do
       assert :ok == DB.begin(@context, shard_id, :read)
       assert :ok == DB.begin(@context, shard_id, :read)
       assert_raise MatchError, fn -> DB.begin(@context, shard_id, :read) end
+    end
+  end
+
+  describe "with_context/2" do
+    test "changes the process context" do
+      {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      DB.begin(:test, shard_1, :write)
+      DB.begin(:test, shard_2, :write)
+
+      # We are at `{:test, shard_2}` because that was the last call to DB.begin/4
+      state = LocalState.get_current_context!()
+      assert state.context == :test
+      assert state.shard_id == shard_2
+
+      # Now we will switch to `{:test, shard_1}`
+      DB.with_context(:test, shard_1)
+      assert LocalState.get_current_context!().shard_id == shard_1
+
+      # And back again to `{:test, shard_2}`
+      DB.with_context(:test, shard_2)
+      assert LocalState.get_current_context!().shard_id == shard_2
+    end
+
+    test "enables interaction between multiple databases in the same Elixir process" do
+      {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      # This would fail if they were both in the same shard due to the PK
+      post_shard_1 = Post.new(%{id: 1, title: "Foo", body: "Body"})
+      post_shard_2 = Post.new(%{id: 1, title: "Foo", body: "Body"})
+
+      DB.begin(:test, shard_1, :write)
+      DB.begin(:test, shard_2, :write)
+
+      # Insert post in `{:test, shard_1}`
+      DB.with_context(:test, shard_1)
+      assert {:ok, _} = DB.insert(post_shard_1)
+
+      # Insert post in `{:test, shard_2}`
+      DB.with_context(:test, shard_2)
+      assert {:ok, _} = DB.insert(post_shard_2)
+
+      # Commit in `{:test, shard_2}`
+      DB.commit()
+
+      # Commit in `{:test, shard_1}`
+      DB.with_context(:test, shard_1)
+      DB.commit()
     end
   end
 

@@ -108,14 +108,30 @@ defmodule Feeb.DB.LocalStateTest do
 
   describe "set_current_context/2" do
     test "updates the Process state" do
+      # Initially, nothing exists in `current_context` even after we add a context entry
+      LocalState.add_entry(:context, 1, {self(), self(), :read})
+      refute current_context_var()
+
+      # The context will only exist in `current_context` after calling `set_current_context/2`
       LocalState.set_current_context(:context, 1)
       assert current_context_var() == {:context, 1}
+    end
+
+    test "raises when setting a context that doesn't exist in the state" do
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          # This will raise because there is no corresponding entry in the `feebdb_state`
+          LocalState.set_current_context(:context, 1)
+        end
+
+      assert error == "Attempted to set a context that doesn't exist: {:context, 1}"
     end
   end
 
   describe "unset_current_context/0" do
     test "unsets the Process state" do
       # There is something set as current context
+      LocalState.add_entry(:context, 1, {self(), self(), :read})
       LocalState.set_current_context(:context, 1)
       assert current_context_var()
 

@@ -14,6 +14,9 @@ defmodule Feeb.DB.LocalState do
          }
 
   def set_current_context(context, shard_id) do
+    if not context_exists?({context, shard_id}),
+      do: raise("Attempted to set a context that doesn't exist: #{inspect({context, shard_id})}")
+
     Process.put(:feebdb_current_context, {context, shard_id})
   end
 
@@ -64,4 +67,10 @@ defmodule Feeb.DB.LocalState do
     new_state = Map.drop(state, [{context, shard_id}])
     Process.put(:feebdb_state, new_state)
   end
+
+  defp context_exists?({_context, _shard_id} = key),
+    do: context_exists?(Process.get(:feebdb_state, %{}), key)
+
+  defp context_exists?(state, {_context, _shard_id} = key),
+    do: Map.has_key?(state, key)
 end

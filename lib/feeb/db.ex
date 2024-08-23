@@ -22,10 +22,23 @@ defmodule Feeb.DB do
   state) instead.
   """
   def begin(context, shard_id, access_type, transaction_type \\ :exclusive) do
+    setup_env(context, shard_id, access_type)
+    with_context(context, shard_id)
+
     # We can't BEGIN EXCLUSIVE in a read-only database
     txn_type = if(access_type == :read, do: :deferred, else: transaction_type)
-    setup_env(context, shard_id, access_type)
     :ok = GenServer.call(get_pid!(), {:begin, txn_type})
+  end
+
+  @doc """
+  Specifies the context (database context and shard_id) that the process should use. Changing
+  contexts will allow the caller process to interact with multiple databases at the same time.
+
+  Raises an error if the given context has not been registered yet. A context is registered when
+  `begin/4` is called.
+  """
+  def with_context(context, shard_id) do
+    LocalState.set_current_context(context, shard_id)
   end
 
   @doc """
@@ -220,7 +233,6 @@ defmodule Feeb.DB do
     {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type)
 
     LocalState.add_entry(context, shard_id, {manager_pid, repo_pid, type})
-    LocalState.set_current_context(context, shard_id)
   end
 
   defp delete_env do
