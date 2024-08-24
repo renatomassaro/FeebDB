@@ -1,3 +1,5 @@
+[![Coverage Status](https://coveralls.io/repos/github/renatomassaro/FeebDB/badge.svg?branch=r/add-github-actions)](https://coveralls.io/github/renatomassaro/FeebDB?branch=r/add-github-actions)
+
 # FeebDB
 
 FeebDB is... hard to explain. Let's try a thought exercise:

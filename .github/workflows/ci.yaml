@@ -1,0 +1,53 @@
+name: FeebDB
+on: [push]
+
+env:
+  MIX_ENV: test
+  FEEBDB_TEST_DATA_DIR: /tmp/feebdb/test_dbs
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Setup backend environment
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Setup database directories
+        run: mkdir -p ${{ env.FEEBDB_TEST_DATA_DIR }}
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        id: mix_cache
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+
+      - name: Install Elixir Dependencies
+        if: steps.mix_cache.outputs.cache-hit != 'true'
+        run: |
+          mix local.rebar --force
+          mix local.hex --force
+          mix deps.get
+          mix deps.compile
+
+      - name: Compile app
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Test app
+        run: mix coveralls.github
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
