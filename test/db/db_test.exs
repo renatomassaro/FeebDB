@@ -108,7 +108,7 @@ defmodule Feeb.DBTest do
     end
   end
 
-  describe "with_context/2" do
+  describe "set_context/2" do
     test "changes the process context" do
       {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
       {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
@@ -122,11 +122,11 @@ defmodule Feeb.DBTest do
       assert state.shard_id == shard_2
 
       # Now we will switch to `{:test, shard_1}`
-      DB.with_context(:test, shard_1)
+      DB.set_context(:test, shard_1)
       assert LocalState.get_current_context!().shard_id == shard_1
 
       # And back again to `{:test, shard_2}`
-      DB.with_context(:test, shard_2)
+      DB.set_context(:test, shard_2)
       assert LocalState.get_current_context!().shard_id == shard_2
     end
 
@@ -142,18 +142,85 @@ defmodule Feeb.DBTest do
       DB.begin(:test, shard_2, :write)
 
       # Insert post in `{:test, shard_1}`
-      DB.with_context(:test, shard_1)
+      DB.set_context(:test, shard_1)
       assert {:ok, _} = DB.insert(post_shard_1)
 
       # Insert post in `{:test, shard_2}`
-      DB.with_context(:test, shard_2)
+      DB.set_context(:test, shard_2)
       assert {:ok, _} = DB.insert(post_shard_2)
 
       # Commit in `{:test, shard_2}`
       DB.commit()
 
       # Commit in `{:test, shard_1}`
-      DB.with_context(:test, shard_1)
+      DB.set_context(:test, shard_1)
+      DB.commit()
+    end
+  end
+
+  describe "with_context/1" do
+    test "allows isolated context execution" do
+      {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      post_shard_1 = Post.new(%{id: 1, title: "Post On Shard 1", body: "Body"})
+      post_shard_2 = Post.new(%{id: 1, title: "Post On Shard 2", body: "Body"})
+
+      # Start a transaction on `{:test, shard_1}`
+      DB.begin(:test, shard_1, :write)
+
+      # Start a transaction on `{:test, shard_2}` in the same process
+      result_from_callback =
+        DB.with_context(fn ->
+          # with_context/1 does not immediatelly change the context; we are still on shard_1
+          assert LocalState.get_current_context!().shard_id == shard_1
+
+          # Now that the transaction has begun, we are on shard_2
+          DB.begin(:test, shard_2, :write)
+          assert LocalState.get_current_context!().shard_id == shard_2
+
+          assert {:ok, post_2} = DB.insert(post_shard_2)
+          DB.commit()
+          post_2
+        end)
+
+      # Now that the callback above has finished executing, we are back to `{:test, shard_1}`
+      assert LocalState.get_current_context!().shard_id == shard_1
+
+      # We can finish writing to `{:test, shard_1}`
+      assert {:ok, _post_1} = DB.insert(post_shard_1)
+      DB.commit()
+
+      # We have the result from `{:test, shard_2}`
+      assert result_from_callback.title == "Post On Shard 2"
+    end
+  end
+
+  describe "with_context/3" do
+    test "sets the new context right after callback starts executing" do
+      {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      # Initially, we are at `{:test, shard_1}`
+      DB.begin(:test, shard_1, :write)
+      assert LocalState.get_current_context!().shard_id == shard_1
+
+      # We have to start with `with_context/1` in order to BEGIN a transaction and set the context
+      DB.with_context(fn ->
+        DB.begin(:test, shard_2, :write)
+      end)
+
+      # Outside the callback we are always at `shard_1`
+      assert LocalState.get_current_context!().shard_id == shard_1
+
+      DB.with_context(:test, shard_2, fn ->
+        # with_context/3 immediatelly changed the context to `shard_2`
+        assert LocalState.get_current_context!().shard_id == shard_2
+        DB.commit()
+      end)
+
+      # Back to `shard_1`
+      assert LocalState.get_current_context!().shard_id == shard_1
       DB.commit()
     end
   end
