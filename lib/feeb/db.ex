@@ -23,7 +23,7 @@ defmodule Feeb.DB do
   """
   def begin(context, shard_id, access_type, transaction_type \\ :exclusive) do
     setup_env(context, shard_id, access_type)
-    with_context(context, shard_id)
+    set_context(context, shard_id)
 
     # We can't BEGIN EXCLUSIVE in a read-only database
     txn_type = if(access_type == :read, do: :deferred, else: transaction_type)
@@ -37,8 +37,30 @@ defmodule Feeb.DB do
   Raises an error if the given context has not been registered yet. A context is registered when
   `begin/4` is called.
   """
-  def with_context(context, shard_id) do
+  def set_context(context, shard_id) do
     LocalState.set_current_context(context, shard_id)
+  end
+
+  @doc """
+  Allow `callback` to switch context but resume previous context when `callback` finishes executing.
+  """
+  def with_context(callback) when is_function(callback) do
+    current_ctx = LocalState.get_current_context!()
+    result = callback.()
+    LocalState.set_current_context(current_ctx.context, current_ctx.shard_id)
+    result
+  end
+
+  @doc """
+  Same as `with_context/1`, but explicitly sets the "temporary" context. You will want to use this
+  function when resuming to a transaction that has already begun.
+  """
+  def with_context(context, shard_id, callback) when is_function(callback) do
+    current_ctx = LocalState.get_current_context!()
+    LocalState.set_current_context(context, shard_id)
+    result = callback.()
+    LocalState.set_current_context(current_ctx.context, current_ctx.shard_id)
+    result
   end
 
   @doc """
