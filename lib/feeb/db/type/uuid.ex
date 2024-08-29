@@ -1,4 +1,6 @@
 defmodule Feeb.DB.Type.UUID do
+  @behaviour Feeb.DB.Type.Behaviour
+
   def sqlite_type, do: :text
 
   def cast!(v, _) when is_binary(v) do

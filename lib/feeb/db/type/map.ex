@@ -1,4 +1,6 @@
 defmodule Feeb.DB.Type.Map do
+  @behaviour Feeb.DB.Type.Behaviour
+
   def sqlite_type, do: :text
 
   def cast!(v, o) when is_map(v), do: v |> dump!(o) |> load!(o)

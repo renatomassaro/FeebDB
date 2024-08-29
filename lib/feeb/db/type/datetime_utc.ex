@@ -1,4 +1,6 @@
 defmodule Feeb.DB.Type.DateTimeUTC do
+  @behaviour Feeb.DB.Type.Behaviour
+
   def sqlite_type, do: :text
 
   def cast!(nil, %{nullable: true}),

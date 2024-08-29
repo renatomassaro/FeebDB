@@ -1,4 +1,6 @@
 defmodule Feeb.DB.Type.Boolean do
+  @behaviour Feeb.DB.Type.Behaviour
+
   def sqlite_type, do: :integer
   def cast!(v, _) when is_boolean(v), do: v
   def dump!(true, _), do: 1

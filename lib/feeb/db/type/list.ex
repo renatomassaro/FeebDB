@@ -1,4 +1,6 @@
 defmodule Feeb.DB.Type.List do
+  @behaviour Feeb.DB.Type.Behaviour
+
   def sqlite_type, do: :text
 
   def cast!(v, o) when is_list(v), do: v |> dump!(o) |> load!(o)

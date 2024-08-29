@@ -1,4 +1,6 @@
 defmodule Feeb.DB.Type.Atom do
+  @behaviour Feeb.DB.Type.Behaviour
+
   def sqlite_type, do: :text
   def cast!(nil, %{nullable: true}), do: nil
   def cast!(v, _) when is_atom(v) and not (is_nil(v) or is_boolean(v)), do: v
