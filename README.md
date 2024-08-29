@@ -1,4 +1,4 @@
-[![Coverage Status](https://coveralls.io/repos/github/renatomassaro/FeebDB/badge.svg?branch=r/add-github-actions)](https://coveralls.io/github/renatomassaro/FeebDB?branch=r/add-github-actions)
+[![Coverage Status](https://coveralls.io/repos/github/renatomassaro/FeebDB/badge.svg?branch=r/add-github-actions)](https://coveralls.io/github/renatomassaro/FeebDB?branch=main)
 
 # FeebDB
 
