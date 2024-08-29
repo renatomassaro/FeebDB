@@ -3,6 +3,7 @@ import Config
 config :feebdb,
   data_dir: System.get_env("FEEBDB_TEST_DATA_DIR", "/tmp/feebdb/test_dbs"),
   migrations_dir: "priv/test/migrations",
+  queries_dir: "priv/test/queries",
   schemas_list: "priv/test/feebdb_schemas.json",
   contexts: %{
     test: %{

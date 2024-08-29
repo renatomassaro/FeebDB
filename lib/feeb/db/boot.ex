@@ -132,22 +132,21 @@ defmodule Feeb.DB.Boot do
   end
 
   def get_all_queries do
-    # TODO: Make it configurable so it works with test/prod queries
     Config.queries_path()
     |> Path.wildcard()
     |> Enum.map(fn path ->
-      name =
+      [raw_domain, raw_context | _] =
         path
-        |> String.slice(13..-1//1)
+        |> String.split("/")
+        |> Enum.reverse()
+
+      domain =
+        raw_domain
         |> String.split(".")
         |> List.first()
+        |> String.to_atom()
 
-      [context, domain] =
-        name
-        |> String.split("/")
-        |> Enum.map(&String.to_atom/1)
-
-      {context, domain, path}
+      {String.to_atom(raw_context), domain, path}
     end)
   end
 
