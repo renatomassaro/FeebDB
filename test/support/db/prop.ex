@@ -1,5 +1,5 @@
 defmodule Test.Feeb.DB.Prop do
-  alias Feeb.DB.{Config, SQLite}
+  alias Feeb.DB.{SQLite}
   alias __MODULE__
 
   def create(context) do
