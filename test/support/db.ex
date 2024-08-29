@@ -6,11 +6,14 @@ defmodule Test.Feeb.DB do
     File.mkdir_p!(props_path())
     File.mkdir_p!(test_dbs_path())
 
-    Enum.each(Config.contexts(), fn context ->
+    contexts = Config.contexts()
+
+    Enum.each(contexts, fn context ->
       File.mkdir_p!("#{test_dbs_path()}/#{context.name}")
     end)
 
-    Test.Feeb.DB.Prop.ensure_props_are_created()
+    # Create all the props, which will be re-used for each test
+    Enum.each(contexts, &Test.Feeb.DB.Prop.create/1)
   end
 
   def on_finish do
