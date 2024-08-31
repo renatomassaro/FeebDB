@@ -1,20 +1,10 @@
 defmodule Feeb.DB.Migrator.Metadata do
   require Logger
 
-  alias Feeb.DB.SQLite
+  alias Feeb.DB.{Config, SQLite}
 
   @migrations_table "__db_migrations"
   @summary_table "__db_migrations_summary"
-
-  # TODO: Precisa ser configuravel / vir da AppConfig
-  # TODO: In the future this should be kept in `__db_apps` but for now that's GoodEnough(TM)
-  def initial_summary_for_context(:lobby), do: %{lobby: 0}
-  def initial_summary_for_context(:singleplayer), do: %{game: 0}
-  def initial_summary_for_context(:multiplayer), do: %{game: 0}
-  def initial_summary_for_context(:test), do: %{test: 0}
-  def initial_summary_for_context(:raw), do: %{raw: 0}
-  def initial_summary_for_context(:saas_prod_one), do: %{events: 0, crm: 0}
-  def initial_summary_for_context(:saas_prod_two), do: %{events: 0, erp: 0}
 
   @doc """
   Sets up all the metadata tables required by Migrator to operate properly.
@@ -74,13 +64,16 @@ defmodule Feeb.DB.Migrator.Metadata do
   Returns a summary of the migrations, with the latest version for each domain.
   """
   def summarize_migrations(conn, context) do
-    base_summary = initial_summary_for_context(context)
+    # The "initial" summary is basically a map of all possible domains with no migrations applied to
+    # them. We will use this as a starting point, in case the shard we are connecting to does not
+    # have yet a fully set up `@summary_table`.
+    initial_summary = initial_summary_for_context(context)
 
     """
     SELECT * FROM #{@summary_table}
     """
     |> SQLite.raw2!(conn)
-    |> Enum.reduce(base_summary, fn [domain, version, _], acc ->
+    |> Enum.reduce(initial_summary, fn [domain, version, _], acc ->
       Map.put(acc, String.to_atom(domain), version)
     end)
   end
@@ -90,5 +83,13 @@ defmodule Feeb.DB.Migrator.Metadata do
       [] -> false
       [_ | _] -> true
     end
+  end
+
+  defp initial_summary_for_context(context) do
+    Config.contexts()
+    |> Enum.find(fn %{name: name} -> name == context end)
+    |> Map.fetch!(:domains)
+    |> Enum.map(fn domain -> {domain, 0} end)
+    |> Map.new()
   end
 end
