@@ -13,7 +13,9 @@ defmodule Sample.AllTypes do
     {:integer, :integer},
     {:integer_nullable, {:integer, nullable: true}},
     {:atom, :atom},
-    {:atom_nullable, {:atom, nullable: true}}
+    {:atom_nullable, {:atom, nullable: true}},
+    {:uuid, :uuid},
+    {:uuid_nullable, {:uuid, nullable: true}}
   ]
 
   def new(params) do
@@ -27,7 +29,8 @@ defmodule Sample.AllTypes do
       boolean: true,
       string: "Some Value",
       integer: 42,
-      atom: :pizza
+      atom: :pizza,
+      uuid: "feebfeeb-feeb-feeb-feeb-feebfeebfeeb"
     }
     |> Map.merge(overwrites)
   end

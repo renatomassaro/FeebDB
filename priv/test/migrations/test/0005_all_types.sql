@@ -10,5 +10,7 @@ CREATE TABLE all_types (
   integer INTEGER,
   integer_nullable INTEGER,
   atom TEXT,
-  atom_nullable TEXT
+  atom_nullable TEXT,
+  uuid TEXT,
+  uuid_nullable TEXT
 ) STRICT;
