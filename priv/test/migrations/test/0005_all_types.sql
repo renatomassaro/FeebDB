@@ -8,5 +8,7 @@ CREATE TABLE all_types (
   string TEXT,
   string_nullable TEXT,
   integer INTEGER,
-  integer_nullable INTEGER
+  integer_nullable INTEGER,
+  atom TEXT,
+  atom_nullable TEXT
 ) STRICT;
