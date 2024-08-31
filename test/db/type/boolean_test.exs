@@ -38,7 +38,7 @@ defmodule Feeb.DB.Type.BooleanTest do
         boolean_nullable: nil
       }
 
-      # We can cast!/2 the value
+      # We can cast! the value
       all_types = AllTypes.new(params)
       assert all_types.boolean_nullable == nil
 
@@ -71,6 +71,8 @@ defmodule Feeb.DB.Type.BooleanTest do
 
       assert log =~ "[warning]"
       assert log =~ "Loaded `nil` value from non-nullable field"
+      assert log =~ "boolean@"
+      assert log =~ "AllTypes\n"
     end
   end
 end

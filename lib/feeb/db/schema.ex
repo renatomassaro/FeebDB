@@ -107,7 +107,7 @@ defmodule Feeb.DB.Schema do
 
       new_args =
         Enum.map(unquote(args), fn {field, value} ->
-          {field, Feeb.DB.Schema.cast_value!(schema, field, value)}
+          {field, Feeb.DB.Schema.cast_value!(__MODULE__, schema, field, value)}
         end)
 
       # TODO: Validate that `args` matches `target_fields` exactly
@@ -136,10 +136,10 @@ defmodule Feeb.DB.Schema do
         value =
           case mod.on_create(struct, field, opts) do
             {:ok, v} ->
-              type_module.cast!(v, opts)
+              type_module.cast!(v, opts, {struct.__struct__, field})
 
             :noop ->
-              type_module.cast!(nil, opts)
+              type_module.cast!(nil, opts, {struct.__struct__, field})
           end
 
         {field, value}
@@ -172,7 +172,7 @@ defmodule Feeb.DB.Schema do
     pre_mod_struct =
       args_map
       |> Enum.reduce(struct, fn {target_field, value}, acc ->
-        Map.put(acc, target_field, cast_value!(schema, target_field, value))
+        Map.put(acc, target_field, cast_value!(struct.__struct__, schema, target_field, value))
       end)
       |> Map.put(:__meta__, Map.put(struct.__meta__, :target, new_target))
 
@@ -185,8 +185,7 @@ defmodule Feeb.DB.Schema do
 
         case mod.on_update(struct, field, opts) do
           {:ok, v} ->
-            type_module.cast!(v, opts)
-            [{field, type_module.cast!(v, opts)} | acc]
+            [{field, type_module.cast!(v, opts, {struct.__struct__, field})} | acc]
 
           :noop ->
             acc
@@ -220,7 +219,7 @@ defmodule Feeb.DB.Schema do
 
     struct
     |> Map.put(:__meta__, Map.put(struct.__meta__, :target, new_target))
-    |> Map.put(target_field, cast_value!(schema, target_field, value))
+    |> Map.put(target_field, cast_value!(struct.__struct__, schema, target_field, value))
   end
 
   def dump(struct, field) do
@@ -231,12 +230,11 @@ defmodule Feeb.DB.Schema do
     try do
       struct
       |> Map.fetch!(field)
-      |> type_module.dump!(opts)
+      |> type_module.dump!(opts, {struct.__struct__, field})
     rescue
       FunctionClauseError ->
-        if is_nil(Map.fetch!(struct, field)) and
-             not Map.has_key?(opts, :nullable),
-           do: raise("#{struct.__struct__}.#{field} is null but it isn't supposed to be")
+        if is_nil(Map.fetch!(struct, field)) and not Map.has_key?(opts, :nullable),
+          do: raise("#{struct.__struct__}.#{field} is null but it isn't supposed to be")
     end
   end
 
@@ -276,7 +274,7 @@ defmodule Feeb.DB.Schema do
       |> Enum.zip(row)
       |> Enum.map(fn {field, v} ->
         {type_module, opts, _mod} = Map.fetch!(schema, field)
-        {field, type_module.load!(v, opts)}
+        {field, type_module.load!(v, opts, {model, field})}
       end)
 
     model
@@ -285,9 +283,9 @@ defmodule Feeb.DB.Schema do
     |> add_missing_values(table_fields, fields_to_populate)
   end
 
-  def cast_value!(schema, field, raw_value) do
+  def cast_value!(schema_mod, schema, field, raw_value) do
     {type_module, opts, _} = Map.fetch!(schema, field)
-    type_module.cast!(raw_value, opts)
+    type_module.cast!(raw_value, opts, {schema_mod, field})
   end
 
   def validate(%_{} = struct, field) when is_atom(field) do
