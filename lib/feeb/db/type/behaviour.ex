@@ -45,6 +45,9 @@ defmodule Feeb.DB.Type.Behaviour do
   For example, a field whose FeebDB type is `:atom` in the schema will be converted from `"foo"`
   into `:foo`. Similarly, a `:datetime_utc` or `:map` would be converted from `TEXT` to the
   corresponding values.
+
+  `load!/2` is called by `Schema.from_row/3`, which is triggered every time we need to convert a
+  raw SQLite row into a FeebDB schema.
   """
   @callback load!(term(), opts :: map()) :: term()
 end
