@@ -6,8 +6,8 @@ defmodule Feeb.DB.QueryTest do
   @queries_path "priv/test/queries"
   @chaos_path "#{@queries_path}/test/chaos.sql"
 
-  # TODO: Add a test case where I actually compile all the real queries
   describe "compile/2" do
+    @tag capture_log: true
     test "handles chaos.sql file" do
       Query.compile(@chaos_path, {:test, :chaos})
 
@@ -20,10 +20,7 @@ defmodule Feeb.DB.QueryTest do
         :delete2
       ]
       |> Enum.each(fn query_name ->
-        assert_chaos_query(
-          query_name,
-          Query.fetch!({:test, :chaos, query_name})
-        )
+        assert_chaos_query(query_name, Query.fetch!({:test, :chaos, query_name}))
       end)
     end
   end
@@ -39,9 +36,7 @@ defmodule Feeb.DB.QueryTest do
   defp assert_chaos_query(:create_user, query) do
     {sql, {fields_b, params_b}, qt} = query
 
-    assert sql ==
-             "insert into accounts ( id, username, email ) values ( ?, ?, ? );"
-
+    assert sql == "insert into accounts ( id, username, email ) values ( ?, ?, ? );"
     assert fields_b == []
     assert params_b == [:id, :username, :email]
     assert qt == :insert
