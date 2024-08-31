@@ -1,7 +1,7 @@
 defmodule Feeb.DB.Type.Boolean do
-  require Logger
-
   @behaviour Feeb.DB.Type.Behaviour
+
+  require Logger
 
   def sqlite_type, do: :integer
 
