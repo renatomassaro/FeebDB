@@ -23,7 +23,7 @@ defmodule Feeb.DB.BootTest do
       all_migrations = Migrator.get_all_migrations()
 
       # Test migrations rarely change and thus can be hard-coded here
-      expected_test_latest = 4
+      expected_test_latest = 5
       test_latest = Migrator.get_latest_version(:test)
 
       assert test_latest == expected_test_latest
