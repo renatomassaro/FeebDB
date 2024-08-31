@@ -9,7 +9,9 @@ defmodule Sample.AllTypes do
     {:boolean, :boolean},
     {:boolean_nullable, {:boolean, nullable: true}},
     {:string, :string},
-    {:string_nullable, {:string, nullable: true}}
+    {:string_nullable, {:string, nullable: true}},
+    {:integer, :integer},
+    {:integer_nullable, {:integer, nullable: true}}
   ]
 
   def new(params) do
@@ -21,7 +23,8 @@ defmodule Sample.AllTypes do
   def creation_params(overwrites \\ %{}) do
     %{
       boolean: true,
-      string: "Some Value"
+      string: "Some Value",
+      integer: 42
     }
     |> Map.merge(overwrites)
   end

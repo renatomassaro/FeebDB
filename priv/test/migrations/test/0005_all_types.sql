@@ -6,5 +6,7 @@ CREATE TABLE all_types (
   boolean INTEGER,
   boolean_nullable INTEGER,
   string TEXT,
-  string_nullable TEXT
+  string_nullable TEXT,
+  integer INTEGER,
+  integer_nullable INTEGER
 ) STRICT;
