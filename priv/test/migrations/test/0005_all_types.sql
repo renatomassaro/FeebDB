@@ -12,5 +12,11 @@ CREATE TABLE all_types (
   atom TEXT,
   atom_nullable TEXT,
   uuid TEXT,
-  uuid_nullable TEXT
+  uuid_nullable TEXT,
+  datetime_utc TEXT,
+  datetime_utc_nullable TEXT,
+  datetime_utc_precision_second TEXT,
+  datetime_utc_precision_millisecond TEXT,
+  datetime_utc_precision_microsecond TEXT,
+  datetime_utc_precision_default TEXT
 ) STRICT;
