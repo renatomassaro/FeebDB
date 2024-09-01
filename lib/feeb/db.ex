@@ -148,6 +148,8 @@ defmodule Feeb.DB do
   end
 
   def all({_, domain, query_name}, bindings) do
+    bindings = if is_list(bindings), do: bindings, else: [bindings]
+
     case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings}) do
       {:ok, rows} -> rows
       {:error, reason} -> raise reason
