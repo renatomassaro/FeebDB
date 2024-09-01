@@ -45,6 +45,15 @@ defmodule Feeb.DB.Schema do
           mod_module = :"Elixir.Feeb.DB.Mod"
           mod = mod_module.get_module(mod)
 
+          # If the datatype module implements `overwrite_opts`, call it
+          opts =
+            try do
+              datatype_module.overwrite_opts(opts, mod, {__MODULE__, column_name})
+            rescue
+              UndefinedFunctionError ->
+                opts
+            end
+
           {column_name, {datatype_module, opts, mod}}
         end)
 

@@ -25,6 +25,13 @@ defmodule Feeb.DB.Type.Behaviour do
   """
   @callback sqlite_type() :: supported_sqlite_type()
 
+  @doc """
+  Allows a type to change the `opts` specified in the Schema module.
+
+  As an usage example, it is used by `DateTimeUTC` type to set a default precision if none is set.
+  """
+  @callback overwrite_opts(opts :: map(), mod :: module(), metadata()) :: new_opts :: map()
+
   # TODO: For `cast!/2` specifically, I want in the future to change its contract to return
   # {:ok, term()} | {:error, reason :: binary()}. If a field fails to cast, we shouldn't crash but
   # instead we should return an Schema with `valid?=false` and `[{field, reason}]` error somewhere.
@@ -60,4 +67,6 @@ defmodule Feeb.DB.Type.Behaviour do
   raw SQLite row into a FeebDB schema.
   """
   @callback load!(term(), opts :: map(), metadata()) :: term()
+
+  @optional_callbacks overwrite_opts: 3
 end
