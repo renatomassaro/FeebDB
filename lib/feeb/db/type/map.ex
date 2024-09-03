@@ -1,18 +1,42 @@
 defmodule Feeb.DB.Type.Map do
   @behaviour Feeb.DB.Type.Behaviour
 
+  require Logger
+
   def sqlite_type, do: :text
 
-  def cast!(v, o, m) when is_map(v), do: v |> dump!(o, m) |> load!(o, m)
+  @doc """
+  When casting, we need to guaranteed that the output follows the `keys` specified in the column
+  opts. For example, if a field has `keys: :atom` and receives %{"foo" => :bar} as value, we need to
+  cast it to %{foo: :bar}.
+  """
+  def cast!(v, opts, _) when is_map(v) do
+    cond do
+      opts[:keys] == :atom -> Utils.Map.atomify_keys(v)
+      opts[:keys] == :safe_atom -> Utils.Map.safe_atomify_keys(v)
+      true -> Utils.Map.stringify_keys(v)
+    end
+  end
+
   def cast!(nil, %{nullable: true}, _), do: nil
 
-  # TODO: Use native decoder now :)
-  # def dump!(v, _) when is_map(v), do: Jason.encode!(v)
+  def dump!(v, _, _) when is_map(v), do: v |> :json.encode() |> to_string()
   def dump!(nil, _, _), do: nil
 
-  # TODO: Use native decoder now :)
-  # def load!(v, %{keys: :string}) when is_binary(v), do: Jason.decode!(v)
-  # def load!(v, %{keys: :atom}) when is_binary(v), do: Jason.decode!(v, keys: :atoms)
-  # def load!(v, _) when is_binary(v), do: Jason.decode!(v, keys: :atoms)
+  def load!(v, opts, _) when is_binary(v) do
+    cond do
+      opts[:keys] == :atom -> v |> decode() |> Utils.Map.atomify_keys()
+      opts[:keys] == :safe_atom -> v |> decode() |> Utils.Map.safe_atomify_keys()
+      true -> v |> decode()
+    end
+  end
+
   def load!(nil, %{nullable: true}, _), do: nil
+
+  def load!(nil, _, {schema, field}) do
+    Logger.warning("Loaded `nil` value from non-nullable field: #{field}@#{schema}")
+    nil
+  end
+
+  defp decode(value), do: :json.decode(value)
 end

@@ -18,5 +18,11 @@ CREATE TABLE all_types (
   datetime_utc_precision_second TEXT,
   datetime_utc_precision_millisecond TEXT,
   datetime_utc_precision_microsecond TEXT,
-  datetime_utc_precision_default TEXT
+  datetime_utc_precision_default TEXT,
+  map TEXT,
+  map_nullable TEXT,
+  map_keys_atom TEXT,
+  map_keys_safe_atom TEXT,
+  map_keys_string TEXT,
+  map_keys_default TEXT
 ) STRICT;
