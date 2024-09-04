@@ -24,5 +24,7 @@ CREATE TABLE all_types (
   map_keys_atom TEXT,
   map_keys_safe_atom TEXT,
   map_keys_string TEXT,
-  map_keys_default TEXT
+  map_keys_default TEXT,
+  list TEXT,
+  list_nullable TEXT
 ) STRICT;

@@ -27,7 +27,9 @@ defmodule Sample.AllTypes do
     {:map_keys_atom, {:map, keys: :atom, nullable: true}},
     {:map_keys_safe_atom, {:map, keys: :safe_atom, nullable: true}},
     {:map_keys_string, {:map, keys: :string, nullable: true}},
-    {:map_keys_default, {:map, nullable: true}}
+    {:map_keys_default, {:map, nullable: true}},
+    {:list, :list},
+    {:list_nullable, {:list, nullable: true}}
   ]
 
   def new(params) do
@@ -44,7 +46,8 @@ defmodule Sample.AllTypes do
       atom: :pizza,
       uuid: "feebfeeb-feeb-feeb-feeb-feebfeebfeeb",
       datetime_utc: DateTime.utc_now(),
-      map: %{foo: "bar"}
+      map: %{foo: "bar"},
+      list: [1, 2, 3]
     }
     |> Map.merge(overwrites)
   end

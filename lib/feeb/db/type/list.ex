@@ -1,20 +1,21 @@
 defmodule Feeb.DB.Type.List do
   @behaviour Feeb.DB.Type.Behaviour
 
+  require Logger
+
   def sqlite_type, do: :text
 
-  def cast!(v, o, m) when is_list(v), do: v |> dump!(o, m) |> load!(o, m)
-  def cast!(nil, %{default: v}, _), do: v
+  def cast!(v, _, _) when is_list(v), do: v
   def cast!(nil, %{nullable: true}, _), do: nil
 
-  # TODO: Use native decoder now :)
-  # def dump!(v, _) when is_list(v), do: Jason.encode!(v)
-  # def dump!(nil, %{default: v}) when is_list(v), do: Jason.encode!(v)
-  def dump!(nil, %{default: nil}, _), do: nil
+  def dump!(v, _, _) when is_list(v), do: :json.encode(v) |> to_string()
   def dump!(nil, %{nullable: true}, _), do: nil
 
-  # TODO: Use native decoder now :)
-  # def load!(v, _) when is_binary(v), do: Jason.decode!(v)
-  def load!(nil, %{default: v}, _), do: v
+  def load!(v, _, _) when is_binary(v), do: :json.decode(v)
   def load!(nil, %{nullable: true}, _), do: nil
+
+  def load!(nil, _, {schema, field}) do
+    Logger.warning("Loaded `nil` value from non-nullable field: #{field}@#{schema}")
+    nil
+  end
 end
