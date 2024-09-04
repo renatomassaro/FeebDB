@@ -2,6 +2,7 @@ defmodule Feeb.DB.Type.Map do
   @behaviour Feeb.DB.Type.Behaviour
 
   require Logger
+  alias Utils.JSON
 
   def sqlite_type, do: :text
 
@@ -20,14 +21,14 @@ defmodule Feeb.DB.Type.Map do
 
   def cast!(nil, %{nullable: true}, _), do: nil
 
-  def dump!(v, _, _) when is_map(v), do: v |> :json.encode() |> to_string()
+  def dump!(v, _, _) when is_map(v), do: JSON.encode!(v)
   def dump!(nil, _, _), do: nil
 
   def load!(v, opts, _) when is_binary(v) do
     cond do
-      opts[:keys] == :atom -> v |> decode() |> Utils.Map.atomify_keys()
-      opts[:keys] == :safe_atom -> v |> decode() |> Utils.Map.safe_atomify_keys()
-      true -> v |> decode()
+      opts[:keys] == :atom -> v |> JSON.decode!() |> Utils.Map.atomify_keys()
+      opts[:keys] == :safe_atom -> v |> JSON.decode!() |> Utils.Map.safe_atomify_keys()
+      true -> JSON.decode!(v)
     end
   end
 
@@ -37,6 +38,4 @@ defmodule Feeb.DB.Type.Map do
     Logger.warning("Loaded `nil` value from non-nullable field: #{field}@#{schema}")
     nil
   end
-
-  defp decode(value), do: :json.decode(value)
 end

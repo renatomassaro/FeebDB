@@ -32,7 +32,7 @@ defmodule Utils.Map do
   def stringify_keys(map) when is_map(map) do
     Enum.reduce(map, %{}, fn {k, v}, acc ->
       cond do
-        is_atom(k) ->
+        is_atom(k) or is_number(k) ->
           Map.put(acc, "#{k}", stringify_keys(v))
 
         is_binary(k) ->

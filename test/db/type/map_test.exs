@@ -7,21 +7,22 @@ defmodule Feeb.DB.Type.MapTest do
 
   describe "map type" do
     test "stores and loads correctly", %{shard_id: shard_id} do
-      params = AllTypes.creation_params(%{map: %{"foo" => "bar"}, map_nullable: %{}})
+      params = AllTypes.creation_params(%{map: %{"foo" => "bar"}, map_nullable: %{1 => nil}})
 
       # Maps are correctly casted
       all_types = AllTypes.new(params)
       assert all_types.map == %{"foo" => "bar"}
-      assert all_types.map_nullable == %{}
+      assert all_types.map_nullable == %{"1" => nil}
 
       # Maps are correctly dumped and loaded
       DB.begin(@context, shard_id, :write)
       assert {:ok, db_all_types} = DB.insert(all_types)
       assert db_all_types.map == %{"foo" => "bar"}
-      assert db_all_types.map_nullable == %{}
+      assert db_all_types.map_nullable == %{"1" => nil}
 
       # Values are stored as text in the database
-      assert [["{\"foo\":\"bar\"}", "{}"]] == DB.raw!("select map, map_nullable from all_types")
+      assert [["{\"foo\":\"bar\"}", "{\"1\":null}"]] ==
+               DB.raw!("select map, map_nullable from all_types")
     end
 
     test "supports nullable", %{shard_id: shard_id} do

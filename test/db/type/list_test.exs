@@ -7,7 +7,7 @@ defmodule Feeb.DB.Type.ListTest do
 
   describe "list type" do
     test "stores and loads correctly", %{shard_id: shard_id} do
-      input_1 = [1, "2", true, false]
+      input_1 = [1, "2", nil, true, false]
       input_2 = []
 
       params = AllTypes.creation_params(%{list: input_1, list_nullable: input_2})
@@ -23,8 +23,8 @@ defmodule Feeb.DB.Type.ListTest do
       assert db_all_types.list == input_1
       assert db_all_types.list_nullable == input_2
 
-      # Values are stored as text in the database
-      assert [["[1,\"2\",true,false]", "[]"]] ==
+      # Values are stored as text in the database. Note there is no `nil` in JSON
+      assert [["[1,\"2\",null,true,false]", "[]"]] ==
                DB.raw!("select list, list_nullable from all_types")
     end
 
