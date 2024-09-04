@@ -2,6 +2,7 @@ defmodule Feeb.DB.Config do
   # TODO: maybe create a `validate_config` that runs (and fails) on boot
 
   @default_migration_dir "priv/migrations"
+  @default_queries_dir "priv/queries"
   @default_schemas_list_file "priv/feebdb_schemas.json"
 
   def contexts do
@@ -19,8 +20,8 @@ defmodule Feeb.DB.Config do
     do: Application.get_env(:feebdb, :migrations_dir, @default_migration_dir)
 
   def queries_path do
-    # TODO: If this is used (it is), then it is untested
-    "priv/queries/**/*.sql"
+    queries_dir = Application.get_env(:feebdb, :queries_dir, @default_queries_dir)
+    "#{queries_dir}/**/*.sql"
   end
 
   defp format_contexts(contexts) do

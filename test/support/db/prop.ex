@@ -1,22 +1,6 @@
 defmodule Test.Feeb.DB.Prop do
-  alias Feeb.DB.{Config, SQLite}
+  alias Feeb.DB.{SQLite}
   alias __MODULE__
-
-  # NOTE: If instead of :nooping you decide on always generating props for each
-  # test execution, watch out for flakes. Run the test suite dozens of times in
-  # a row and make sure everything passes consistently.
-  def ensure_props_are_created do
-    Config.contexts()
-    |> Enum.each(fn context ->
-      context.name
-      |> get_path()
-      |> File.stat()
-      |> case do
-        {:ok, _} -> :noop
-        {:error, :enoent} -> create(context)
-      end
-    end)
-  end
 
   def create(context) do
     {t, _} = :timer.tc(fn -> do_create(context) end)
