@@ -47,18 +47,8 @@ defmodule Feeb.DB.Migrator do
 
     case setup_check_result do
       :ok ->
-        summary =
-          case Metadata.summarize_migrations(conn, context) do
-            %{} = m when map_size(m) == 0 ->
-              # TODO: Simplify this code
-              raise "No longer happens"
-              Metadata.initial_summary_for_context(context)
-
-            summary ->
-              summary
-          end
-
-        summary
+        conn
+        |> Metadata.summarize_migrations(context)
         |> Enum.reduce({:migrated, []}, fn {domain, v}, acc ->
           latest_version = get_latest_version(domain)
 
