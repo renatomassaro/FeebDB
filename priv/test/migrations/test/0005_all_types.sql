@@ -26,5 +26,8 @@ CREATE TABLE all_types (
   map_keys_string TEXT,
   map_keys_default TEXT,
   list TEXT,
-  list_nullable TEXT
+  list_nullable TEXT,
+  enum TEXT,
+  enum_nullable TEXT,
+  enum_safe_atom TEXT
 ) STRICT;

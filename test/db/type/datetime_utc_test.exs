@@ -189,6 +189,17 @@ defmodule Feeb.DB.Type.DateTimeUTCTest do
     end
   end
 
+  describe "overwrite_opts/3" do
+    test "keeps precision if one is given" do
+      opts = %{precision: :second}
+      assert opts == DB.Type.DateTimeUTC.overwrite_opts(opts, nil, nil)
+    end
+
+    test "adds default precision if none is given" do
+      assert %{precision: :microsecond} == DB.Type.DateTimeUTC.overwrite_opts(%{}, nil, nil)
+    end
+  end
+
   defp assert_precision_in_db(field, expected_value) do
     assert [[expected_value]] == DB.raw!("select #{field} from all_types")
   end

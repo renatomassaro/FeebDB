@@ -29,7 +29,10 @@ defmodule Sample.AllTypes do
     {:map_keys_string, {:map, keys: :string, nullable: true}},
     {:map_keys_default, {:map, nullable: true}},
     {:list, :list},
-    {:list_nullable, {:list, nullable: true}}
+    {:list_nullable, {:list, nullable: true}},
+    {:enum, {:enum, values: [:one, :two, :three]}},
+    {:enum_nullable, {:enum, values: ["foo", "bar", "baz"], nullable: true}},
+    {:enum_safe_atom, {:enum, values: [:safe, :atom], format: :safe_atom, nullable: true}}
   ]
 
   def new(params) do
@@ -47,7 +50,8 @@ defmodule Sample.AllTypes do
       uuid: "feebfeeb-feeb-feeb-feeb-feebfeebfeeb",
       datetime_utc: DateTime.utc_now(),
       map: %{foo: "bar"},
-      list: [1, 2, 3]
+      list: [1, 2, 3],
+      enum: :one
     }
     |> Map.merge(overwrites)
   end
