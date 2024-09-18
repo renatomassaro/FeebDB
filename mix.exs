@@ -52,6 +52,7 @@ defmodule Feeb.DB.Mixfile do
   def deps do
     [
       {:exqlite, "~> 0.23"},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:excoveralls, "~> 0.18.2", only: :test}
     ]
   end
