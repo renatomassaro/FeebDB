@@ -20,7 +20,8 @@ defmodule Feeb.DB.Mixfile do
         "coveralls.detail": :test,
         "coveralls.json": :test,
         "coveralls.post": :test
-      ]
+      ],
+      dialyzer: [plt_add_apps: [:mix]]
     ]
   end
 
@@ -52,6 +53,7 @@ defmodule Feeb.DB.Mixfile do
   def deps do
     [
       {:exqlite, "~> 0.23"},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:excoveralls, "~> 0.18.2", only: :test}
     ]
   end

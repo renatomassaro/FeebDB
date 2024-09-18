@@ -193,7 +193,7 @@ defmodule Feeb.DB.Repo.Manager do
     log_fn =
       case level do
         :info -> &Logger.info/2
-        :warning -> &Logger.warning/2
+        # :warning -> &Logger.warning/2
         :error -> &Logger.error/2
       end
 

@@ -12,7 +12,6 @@ defmodule Feeb.DB.Boot do
   require Logger
   alias Feeb.DB.{Config, Migrator, Query, Repo, Schema}
 
-  @env Mix.env()
   @boot_indicator_key :feebdb_finished_booting
 
   def run do
@@ -119,7 +118,6 @@ defmodule Feeb.DB.Boot do
   def get_all_models do
     # TODO: Schema.List should be generated from a JSON that lives in the application's priv/ folder
     Schema.List.all()
-    |> filter_models_by_env()
     |> Enum.map(fn {context, modules} ->
       modules_details =
         Enum.map(modules, fn mod ->
@@ -277,16 +275,5 @@ defmodule Feeb.DB.Boot do
 
   defp save_model({context, model, table, _}) do
     :persistent_term.put({:db_table_models, {context, table}}, model)
-  end
-
-  defp filter_models_by_env(models) do
-    # This can be turned into a config, like: test_contexts
-    # TODO: I think this is not needed because we filter models when saving metadata
-    if @env != :test do
-      # Enum.reject(models, fn {domain, _} -> domain == :test end)
-      Map.drop(models, [:test])
-    else
-      models
-    end
   end
 end

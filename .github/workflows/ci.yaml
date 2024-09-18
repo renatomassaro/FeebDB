@@ -29,9 +29,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          key: test-${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
 
       - name: Install Elixir Dependencies
         if: steps.mix_cache.outputs.cache-hit != 'true'
@@ -51,3 +49,63 @@ jobs:
         run: mix coveralls.github
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  linters:
+    runs-on: ubuntu-24.04
+
+    env:
+      MIX_ENV: dev
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Setup backend environment
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        id: mix_cache
+        with:
+          path: |
+            deps
+            _build
+          key: dev-${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+
+      - name: Install Elixir Dependencies
+        if: steps.mix_cache.outputs.cache-hit != 'true'
+        run: |
+          mix local.rebar --force
+          mix local.hex --force
+          mix deps.get
+          mix deps.compile
+
+      # Restore PLT cache (if any). Note this is a cache/restore action
+      - name: Restore PLT cache
+        id: plt_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: _build/dev/*.plt*
+          # NOTE: The "official" Dialyxir example includes the mix.lock file but I'm explicitly
+          # removing it for incremental updates
+          key: |
+            plt-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plt
+
+      - name: Create PLTs
+        if: steps.plt_cache.outputs.cache-hit != 'true'
+        run: mix dialyzer --plt
+
+      # Save the PLT cache. Note this is a cache/save action
+      - name: Save PLT cache
+        id: plt_cache_save
+        uses: actions/cache/save@v4
+        if: steps.plt_cache.outputs.cache-hit != 'true'
+        with:
+          path: _build/dev/*.plt*
+          key: |
+            plt-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-plt
+
+      - name: Run dialyzer
+        run: mix dialyzer --format github

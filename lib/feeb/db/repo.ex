@@ -1,6 +1,9 @@
 defmodule Feeb.DB.Repo do
   @moduledoc false
 
+  # This can be removed once the usage of `DB.prepared_raw/3` is consolidated
+  @dialyzer {:nowarn_function, format_custom: 3}
+
   use GenServer
   require Logger
   alias Feeb.DB.{Config, Migrator, Query, Schema, SQLite}
@@ -267,7 +270,6 @@ defmodule Feeb.DB.Repo do
 
   defp format_result(:delete, _, _, [], _bindings), do: {:ok, []}
 
-  defp create_schema_from_rows({:pragma, _}, _, rows), do: rows
   defp create_schema_from_rows({_, :pragma, _}, _, rows), do: rows
 
   defp create_schema_from_rows(query_id, {_, {fields_bindings, _}, :select}, rows) do
