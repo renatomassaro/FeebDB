@@ -279,26 +279,30 @@ defmodule Feeb.DB.Migrator do
     end
   end
 
-  def get_all_migrations do
-    if @env == :test do
+  if @env == :test do
+    def get_all_migrations do
       if Process.get({:migrator, :all_migrations}, false) do
         Process.get({:migrator, :all_migrations})
       else
         :persistent_term.get({:migrator, :all_migrations})
       end
-    else
+    end
+  else
+    def get_all_migrations do
       :persistent_term.get({:migrator, :all_migrations})
     end
   end
 
-  def get_latest_version(domain) do
-    if @env == :test do
+  if @env == :test do
+    def get_latest_version(domain) do
       if Process.get({:migrator, :latest_version, domain}, false) do
         Process.get({:migrator, :latest_version, domain}, 0)
       else
         :persistent_term.get({:migrator, :latest_version, domain}, 0)
       end
-    else
+    end
+  else
+    def get_latest_version(domain) do
       :persistent_term.get({:migrator, :latest_version, domain}, 0)
     end
   end

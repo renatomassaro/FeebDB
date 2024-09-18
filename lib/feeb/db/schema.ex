@@ -1,6 +1,4 @@
 defmodule Feeb.DB.Schema do
-  @env Mix.env()
-
   defmacro __using__(_opts) do
     quote do
       alias unquote(__MODULE__)
@@ -335,18 +333,7 @@ defmodule Feeb.DB.Schema do
   end
 
   defp get_table_fields(model) do
-    if @env != :test do
-      :persistent_term.get({:db_table_fields, model})
-    else
-      # Test schemas may not exist in the PT created at Boot time
-      try do
-        :persistent_term.get({:db_table_fields, model})
-      rescue
-        ArgumentError ->
-          model.__cols__()
-          raise "Bad bad test"
-      end
-    end
+    :persistent_term.get({:db_table_fields, model})
   end
 
   def set_private(%{__private__: private} = schema, k, v) do

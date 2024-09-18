@@ -2,7 +2,6 @@ defmodule Feeb.DB.Query do
   require Logger
   alias __MODULE__.Binding
 
-  @env Mix.env()
   @initial_q {"", {[], []}, nil}
 
   def compile(path, {context, domain}) do
@@ -164,9 +163,6 @@ defmodule Feeb.DB.Query do
   end
 
   defp append_runtime_query({context, domain, query_name}, {_, _, _} = adhoc_query) do
-    if @env == :test,
-      do: :persistent_term.put(:last_db_sql_query_appended_at, System.monotonic_time())
-
     # Replace domain queries with the new query we compiled in runtime
     adhoc_queries = :persistent_term.get({:db_sql_queries, {context, domain}}, %{})
 
