@@ -30,15 +30,13 @@ defmodule Feeb.DB.Migrator.MetadataTest do
       # Now the migrations table is properly set up
       assert [
                [0, "domain", "TEXT", 1, nil, 1],
-               [1, "version", "INTEGER", 1, nil, 2],
-               [2, "inserted_at", "TEXT", 1, nil, 0]
+               [1, "version", "INTEGER", 1, nil, 2]
              ] = SQLite.raw!(conn, "pragma table_info(#{@migrations_table})")
 
       # And so is the summary table
       assert [
                [0, "domain", "TEXT", 1, nil, 1],
-               [1, "version", "INTEGER", 1, nil, 2],
-               [2, "inserted_at", "TEXT", 1, nil, 0]
+               [1, "version", "INTEGER", 1, nil, 2]
              ] = SQLite.raw!(conn, "pragma table_info(#{@summary_table})")
     end
   end
@@ -56,21 +54,20 @@ defmodule Feeb.DB.Migrator.MetadataTest do
       Metadata.insert_migration(conn, :core, 1)
 
       # We now have one migration!
-      assert [["core", 1, date_1]] = SQLite.raw!(conn, list_migrations)
-      assert String.length(date_1) == 19
+      assert [["core", 1]] = SQLite.raw!(conn, list_migrations)
 
       # And another!
       Metadata.insert_migration(conn, :core, 2)
 
-      assert [["core", 2, _], ["core", 1, _]] = SQLite.raw!(conn, list_migrations)
+      assert [["core", 2], ["core", 1]] = SQLite.raw!(conn, list_migrations)
 
       # And another, now from a different domain
       Metadata.insert_migration(conn, :mob, 1)
 
-      assert [["core", 2, _], ["core", 1, _], ["mob", 1, _]] = SQLite.raw!(conn, list_migrations)
+      assert [["core", 2], ["core", 1], ["mob", 1]] = SQLite.raw!(conn, list_migrations)
 
       # The summary table was updated correctly
-      assert [["core", 2, _], ["mob", 1, _]] =
+      assert [["core", 2], ["mob", 1]] =
                SQLite.raw!(conn, "SELECT * FROM #{@summary_table} ORDER BY domain ASC")
     end
   end
