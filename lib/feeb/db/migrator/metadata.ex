@@ -14,8 +14,8 @@ defmodule Feeb.DB.Migrator.Metadata do
 
     """
     CREATE TABLE #{@migrations_table} (
-      domain text,
-      version integer,
+      domain TEXT,
+      version INTEGER,
       PRIMARY KEY (domain, version)
     ) STRICT;
     """
@@ -23,8 +23,8 @@ defmodule Feeb.DB.Migrator.Metadata do
 
     """
     CREATE TABLE #{@summary_table} (
-      domain text,
-      version integer,
+      domain TEXT,
+      version INTEGER,
       PRIMARY KEY (domain, version)
     ) STRICT;
     """
