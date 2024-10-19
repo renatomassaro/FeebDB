@@ -1,7 +1,7 @@
 defmodule Feeb.DB.Migrator do
   require Logger
   alias Feeb.DB.{Config, SQLite}
-  alias Feeb.DB.Migrator.Metadata
+  alias Feeb.DB.Migrator.{Metadata, Parser}
 
   @env Mix.env()
 
@@ -89,7 +89,8 @@ defmodule Feeb.DB.Migrator do
 
         # Simply run the sql file directly, line by line
         sql_file
-        |> queries_from_sql_file()
+        |> File.read!()
+        |> Parser.queries_from_sql_lines()
         |> Enum.each(fn query -> SQLite.raw!(conn, query) end)
 
       {:exs_only, _path} ->
@@ -104,46 +105,6 @@ defmodule Feeb.DB.Migrator do
       nil ->
         raise "Migration not found: #{domain}@#{v}"
     end
-  end
-
-  # TODO: This breaks when there are comments at the middle of a query
-  defp queries_from_sql_file(path) do
-    # NOTE: This entire function is such a hack... but it works.
-    # Despite not being tested directly, it is indirectly tested.
-    file_without_comments = fn lines ->
-      all_comments =
-        lines
-        |> String.split("\n")
-        |> Enum.reject(fn line -> not String.contains?(line, "--") end)
-        |> Enum.map(fn line ->
-          if String.contains?(line, ";") do
-            raise "TODO"
-          else
-            line
-          end
-        end)
-
-      Enum.reduce(all_comments, lines, fn comment, acc ->
-        String.replace(acc, comment, "")
-      end)
-    end
-
-    path
-    |> File.read!()
-    |> file_without_comments.()
-    |> String.split(";\n")
-    |> Enum.reduce([], fn row, acc ->
-      case String.split(row, "\n\n") do
-        [one] -> [one | acc]
-        [one, ""] -> [one | acc]
-        [one, two] -> [two | [one, acc]]
-        [one, two, three] -> [three | [two | [one, acc]]]
-      end
-    end)
-    |> List.flatten()
-    |> Enum.reverse()
-    |> Enum.map(fn sql -> sql |> String.replace("\n", "") end)
-    |> Enum.reject(fn sql -> sql == "" or String.starts_with?(sql, "--") end)
   end
 
   # Maybe move below to metadata as well
