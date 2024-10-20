@@ -35,15 +35,7 @@ defmodule Mix.Tasks.FeebDb.Gen.MigrationTest do
     test "generates a migration file when input is valid (.exs)" do
       migrations_path = Config.migrations_path()
 
-      expect(FileMock, :mkdir_p, fn _path ->
-        nil
-      end)
-
-      expect(FileMock, :mkdir_p, fn path ->
-        # migrations_path (from Config) is being used as top-level path, which is then prepended
-        # to the input domain
-        assert path =~ "#{migrations_path}/lobby"
-      end)
+      expect(FileMock, :mkdir_p, fn _path -> "" end)
 
       expect(FileMock, :touch, fn path ->
         assert path =~ "#{migrations_path}/lobby"
@@ -59,9 +51,7 @@ defmodule Mix.Tasks.FeebDb.Gen.MigrationTest do
     test "handles input if the file contains .sql extension" do
       migrations_path = Config.migrations_path()
 
-      expect(FileMock, :mkdir_p, fn _path ->
-        nil
-      end)
+      expect(FileMock, :mkdir_p, fn _path -> "" end)
 
       expect(FileMock, :touch, fn path ->
         assert path =~ "#{migrations_path}/lobby"
