@@ -10,7 +10,7 @@ defmodule Feeb.DB.Boot do
   """
 
   require Logger
-  alias Feeb.DB.{Config, Migrator, Query, Repo, Schema}
+  alias Feeb.DB.{Config, Migrator, Query, Schema}
 
   @boot_indicator_key :feebdb_finished_booting
 
@@ -38,68 +38,76 @@ defmodule Feeb.DB.Boot do
     end
   end
 
-  ##############################################################################
-  # Functions below this point are internal. They may be public for testing
-  # purposes only, but they should not be called directly. Only Boot.run/0 is a
-  # valid entrypoint for this module.
-  ##############################################################################
+  ##################################################################################################
+  # Functions below this point are internal. They may be public for testing purposes only, but they
+  # should not be called directly. Only Boot.run/0 is a valid entrypoint for this module.
+  # One acceptable exception is the `mix feeb_db.migrate` task.
+  ##################################################################################################
 
-  ##############################################################################
+  ##################################################################################################
   # Shard migration
-  ##############################################################################
+  ##################################################################################################
 
   def migrate_shards do
     Migrator.setup()
 
     Enum.each(Config.contexts(), fn context ->
-      :done = migrate_shards_for_context(context)
-      :done = migrate_setup_shards_for_context(context)
+      :done = migrate_global_shards(context)
+      :done = migrate_setup_shards(context)
+      :done = migrate_application_shards(context)
     end)
   end
 
-  defp migrate_shards_for_context(context, n \\ 1) do
-    case do_migrate_shard(context, n) do
-      :ok -> migrate_shards_for_context(context, n + 1)
-      {:error, :shard_not_found} -> :done
-    end
+  defp migrate_global_shards(%{shard_type: :global} = context) do
+    migrate_shard(context, 1)
+    :done
   end
 
-  defp migrate_setup_shards_for_context(context),
-    do: :ok == do_migrate_shard(context, -1) && :done
+  defp migrate_global_shards(_), do: :done
 
-  defp do_migrate_shard(context, shard_id) do
-    path = Repo.get_path(context.name, shard_id)
+  defp migrate_application_shards(context) do
+    context
+    |> get_shards_for_context()
+    |> Stream.each(fn shard_id -> migrate_shard(context, shard_id) end)
+    |> Stream.run()
 
-    continue_migrating? =
-      cond do
-        # Global shards have a single shard, so we can stop here
-        context.shard_type == :global and shard_id > 1 ->
-          false
-
-        # Setup shard should always be migrated
-        shard_id == -1 ->
-          true
-
-        # If the file does not exist, create if global shard. Otherwise, stop migrating
-        {:error, :enoent} == File.stat(path) ->
-          context.shard_type == :global and shard_id == 1
-
-        :else ->
-          true
-      end
-
-    if continue_migrating? do
-      Feeb.DB.begin(context.name, shard_id, :write)
-      Feeb.DB.commit()
-      :ok
-    else
-      {:error, :shard_not_found}
-    end
+    :done
   end
 
-  ##############################################################################
+  defp migrate_setup_shards(context) do
+    migrate_shard(context, -1)
+    :done
+  end
+
+  # Shards of ID -99 are for internal testing and are not migrated by default
+  defp migrate_shard(_, -99), do: :ok
+
+  defp migrate_shard(context, shard_id) do
+    # We automatically migrate the shard by simply opening and closing a connection to the shard
+    Feeb.DB.begin(context.name, shard_id, :write)
+    Feeb.DB.commit()
+    :ok
+  end
+
+  defp get_shards_for_context(context) do
+    base_path = "#{Config.data_dir()}/#{context.name}/"
+    base_path_len = String.length(base_path)
+
+    # TODO: This function stores all shards (paths) in memory, which may not be a good idea when
+    # handling thousands of shards. Benchmark, see how the code reacts and refactor if needed.
+    # TODO: Support "shard of shards" directory hierarchy
+    "#{base_path}/*.db"
+    |> Path.wildcard()
+    |> Stream.map(fn path ->
+      path
+      |> String.slice(base_path_len..-4//1)
+      |> String.to_integer()
+    end)
+  end
+
+  ##################################################################################################
   # Setup
-  ##############################################################################
+  ##################################################################################################
 
   def setup do
     all_contexts = Config.contexts()
