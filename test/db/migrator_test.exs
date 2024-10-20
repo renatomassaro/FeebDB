@@ -36,8 +36,9 @@ defmodule Feeb.DB.MigratorTest do
     test "migrates to latest (saas_prod_one)", %{conn: conn} do
       Migrator.Metadata.setup(conn)
 
-      latest_crm_version = 2
-      latest_events_version = 1
+      # Note: I'm using `String.to_integer/1` to avoid having 123_456_789 formatting (hard to read)
+      latest_crm_version = "241020102902" |> String.to_integer()
+      latest_events_version = "241020150100" |> String.to_integer()
       Migrator.cache_latest_version(:crm, latest_crm_version, :process)
       Migrator.cache_latest_version(:events, latest_events_version, :process)
 
