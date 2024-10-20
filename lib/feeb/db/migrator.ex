@@ -110,46 +110,14 @@ defmodule Feeb.DB.Migrator do
     end
   end
 
-  # Maybe move below to metadata as well
-
-  # `migrations_dir` can be removed now that we have Config, but make sure it follows the same
-  # logic as before
-  def migrations_dir do
-    Config.migrations_path()
-  end
-
-  # def migrations_dir do
-  #   cond do
-  #     test_dir = Process.get(:db_migrations_dir, false) ->
-  #       if @env == :prod, do: raise("Unexpected migrations dir")
-  #       Logger.warning("Using custom migrations dir: #{test_dir}")
-  #       test_dir
-
-  #     not is_nil(@config_migrations_path) ->
-  #       @config_migrations_path
-
-  #     true ->
-  #       @default_migrations_path
-  #   end
-  # end
-
   @doc """
   Returns a map with all migrations and the corresponding .exs and/or .sql
   files. Notice that the result of this function is the same for every shard,
   regardless of their version. As such, it may make sense to memoize its result.
   """
   def calculate_all_migrations do
-    paths = [migrations_dir()] |> Enum.uniq()
-
-    # paths =
-    #   if @env == :test do
-    #     [@default_migrations_path] ++ [migrations_dir()]
-    #   else
-    #     [@default_migrations_path]
-    #   end
-    #   |> Enum.uniq()
-
-    paths
+    [Config.migrations_path()]
+    |> Enum.uniq()
     |> Enum.map(fn path -> calculate_all_migrations(path) end)
     |> Enum.reduce(%{}, fn migs, acc ->
       Map.merge(migs, acc)
