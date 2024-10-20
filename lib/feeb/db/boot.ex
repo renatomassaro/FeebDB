@@ -1,13 +1,5 @@
 defmodule Feeb.DB.Boot do
-  @moduledoc """
-  NOTE: I have contexts and domains. Using mob as an example:
-  `lobby` and `mob` are contexts. Lobby has `lobby` and `events` domains, whereas
-  `mob` has `core`, `crm`, `mob` and `events` domains
-
-  Using he:
-  We only have `lobby` context with `lobby` domain, they map 1:1.
-  Most of the time (I think) we don't need shared domains, but that's supported.
-  """
+  @moduledoc false
 
   require Logger
   alias Feeb.DB.{Config, Migrator, Query, Schema}
