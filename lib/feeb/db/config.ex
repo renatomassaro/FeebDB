@@ -19,10 +19,11 @@ defmodule Feeb.DB.Config do
   def migrations_path,
     do: Application.get_env(:feebdb, :migrations_dir, @default_migration_dir)
 
-  def queries_path do
-    queries_dir = Application.get_env(:feebdb, :queries_dir, @default_queries_dir)
-    "#{queries_dir}/**/*.sql"
-  end
+  def queries_path,
+    do: Application.get_env(:feebdb, :queries_dir, @default_queries_dir)
+
+  def queries_search_path,
+    do: "#{queries_path()}/**/*.sql"
 
   defp format_contexts(contexts) do
     Enum.map(contexts, fn {name, ctx_data} ->

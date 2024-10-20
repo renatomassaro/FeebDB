@@ -130,7 +130,7 @@ defmodule Feeb.DB.Boot do
   end
 
   def get_all_queries do
-    Config.queries_path()
+    Config.queries_search_path()
     |> Path.wildcard()
     |> Enum.map(fn path ->
       [raw_domain, raw_context | _] =
