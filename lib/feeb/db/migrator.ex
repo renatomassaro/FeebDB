@@ -80,6 +80,9 @@ defmodule Feeb.DB.Migrator do
     end)
   end
 
+  # NOTE: Performance-wise, this is a low hanging fruit. While `queries_from_sql_lines/1` could
+  # be substantially improved, it is fast enough. However, imagine one is migrating thousands of
+  # shards. The migrations will be parsed again for each shard. We'd benefit from some cache.
   defp apply_migration!(conn, migrations, domain, v) do
     migration = get_in(migrations, [domain, v])
 
