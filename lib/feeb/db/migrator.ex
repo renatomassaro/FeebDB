@@ -73,12 +73,30 @@ defmodule Feeb.DB.Migrator do
     migrations = get_all_migrations()
 
     Enum.each(domains_to_migrate, fn {domain, cur_v, latest_v} ->
-      Enum.each((cur_v + 1)..latest_v, fn v ->
-        apply_migration!(conn, migrations, domain, v)
-        Metadata.insert_migration(conn, domain, v)
-      end)
+      if cur_v < latest_v do
+        missing_versions =
+          migrations
+          |> Map.fetch!(domain)
+          |> Map.keys()
+          |> Enum.reject(fn v -> v <= cur_v end)
+          |> Enum.sort()
+
+        migrate_next(conn, migrations, domain, missing_versions)
+      else
+        :noop
+      end
     end)
   end
+
+  defp migrate_next(conn, migrations, domain, [v | next_migrations]) do
+    apply_migration!(conn, migrations, domain, v)
+    Metadata.insert_migration(conn, domain, v)
+
+    # Keep migrating until all missing migrations are applied
+    migrate_next(conn, migrations, domain, next_migrations)
+  end
+
+  defp migrate_next(_, _, _, []), do: :ok
 
   # NOTE: Performance-wise, this is a low hanging fruit. While `queries_from_sql_lines/1` could
   # be substantially improved, it is fast enough. However, imagine one is migrating thousands of
@@ -144,7 +162,6 @@ defmodule Feeb.DB.Migrator do
 
       {String.to_atom(domain), version, path}
     end)
-    |> Enum.sort_by(fn {_, v, _} -> v end)
     |> Enum.group_by(fn {domain, _, _} -> domain end)
     |> Enum.map(fn {domain, domain_entries} ->
       entries =
