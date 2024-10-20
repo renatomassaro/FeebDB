@@ -17,7 +17,7 @@ defmodule Feeb.DB.MigratorTest do
     test "migrates to latest (lobby migrations)", %{conn: conn} do
       Migrator.Metadata.setup(conn)
 
-      latest_lobby_version = 1
+      latest_lobby_version = 2
       Migrator.cache_latest_version(:lobby, latest_lobby_version, :process)
 
       # This is a fresh DB, so we'll migrate from zero to latest
@@ -27,7 +27,7 @@ defmodule Feeb.DB.MigratorTest do
       # The `users` and `sessions` tables are present
       # FIXME: Once sessions are added
       refute [] == SQLite.raw!(conn, "pragma table_info(users)")
-      assert [] == SQLite.raw!(conn, "pragma table_info(sessions)")
+      refute [] == SQLite.raw!(conn, "pragma table_info(sessions)")
 
       # The migrations are stored in the internal metadata tables
       assert %{lobby: latest_lobby_version} == Migrator.Metadata.summarize_migrations(conn, :lobby)
@@ -64,7 +64,7 @@ defmodule Feeb.DB.MigratorTest do
 
       # The `users` and `sessions` tables are present!
       refute {:ok, []} == DB.raw("pragma table_info(users)")
-      assert {:ok, []} == DB.raw("pragma table_info(sessions)")
+      refute {:ok, []} == DB.raw("pragma table_info(sessions)")
     end
 
     @tag capture_log: true
@@ -73,7 +73,7 @@ defmodule Feeb.DB.MigratorTest do
 
       # The `users` and `sessions` tables are present!
       refute {:ok, []} == DB.raw("pragma table_info(users)")
-      assert {:ok, []} == DB.raw("pragma table_info(sessions)")
+      refute {:ok, []} == DB.raw("pragma table_info(sessions)")
     end
 
     test "saas_prod_two", %{shard_id: shard_id} do
@@ -90,19 +90,15 @@ defmodule Feeb.DB.MigratorTest do
   describe "get_migration_status/2" do
     @tag capture_log: true
     test "returns the expected status", %{conn: conn} do
-      Migrator.cache_latest_version(:lobby, 1, :process)
-
       # The lobby DB is at the zeroth migration and needs to be migrated
-      assert {:needs_migration, [{:lobby, 0, 1}]} ==
+      assert {:needs_migration, [{:lobby, 0, 2}]} ==
                Migrator.get_migration_status(conn, :lobby, :readwrite)
 
-      # Let's migrate it up to 1
-      assert :ok == Migrator.migrate(conn, [{:lobby, 0, 1}])
+      # Let's migrate it
+      assert :ok == Migrator.migrate(conn, [{:lobby, 0, 2}])
 
-      # We are at 1
-      assert %{lobby: 1} == Migrator.Metadata.summarize_migrations(conn, :lobby)
-
-      # And now we are fully migrated
+      # We are now fully migrated at v2
+      assert %{lobby: 2} == Migrator.Metadata.summarize_migrations(conn, :lobby)
       assert :migrated == Migrator.get_migration_status(conn, :lobby, :readwrite)
     end
   end
@@ -117,8 +113,7 @@ defmodule Feeb.DB.MigratorTest do
       assert [:crm, :erp, :events, :lobby, :test] = migrations |> Map.keys() |> Enum.sort()
 
       # There are multiple migrations in lobby
-      # FIXME: Once sessions are added
-      refute Enum.count(migrations.lobby) > 1
+      assert Enum.count(migrations.lobby) == 2
 
       # Lobby's first migration
       assert {:sql_only, "priv/test/migrations/lobby/0001_add_users.sql"} ==
