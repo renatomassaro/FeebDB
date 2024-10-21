@@ -14,9 +14,8 @@ defmodule Feeb.DB.Migrator.Metadata do
 
     """
     CREATE TABLE #{@migrations_table} (
-      domain text,
-      version integer,
-      inserted_at TEXT NOT NULL,
+      domain TEXT,
+      version INTEGER,
       PRIMARY KEY (domain, version)
     ) STRICT;
     """
@@ -24,9 +23,8 @@ defmodule Feeb.DB.Migrator.Metadata do
 
     """
     CREATE TABLE #{@summary_table} (
-      domain text,
-      version integer,
-      inserted_at TEXT NOT NULL,
+      domain TEXT,
+      version INTEGER,
       PRIMARY KEY (domain, version)
     ) STRICT;
     """
@@ -39,9 +37,9 @@ defmodule Feeb.DB.Migrator.Metadata do
   def insert_migration(conn, domain, version) do
     """
     INSERT INTO #{@migrations_table}
-      (domain, version, inserted_at)
+      (domain, version)
     VALUES
-      ('#{domain}', #{version}, datetime());
+      ('#{domain}', #{version});
     """
     |> SQLite.raw2!(conn)
 
@@ -53,9 +51,9 @@ defmodule Feeb.DB.Migrator.Metadata do
 
     """
     INSERT INTO #{@summary_table}
-      (domain, version, inserted_at)
+      (domain, version)
     VALUES
-      ('#{domain}', #{version}, datetime());
+      ('#{domain}', #{version});
     """
     |> SQLite.raw2!(conn)
   end
@@ -73,7 +71,7 @@ defmodule Feeb.DB.Migrator.Metadata do
     SELECT * FROM #{@summary_table}
     """
     |> SQLite.raw2!(conn)
-    |> Enum.reduce(initial_summary, fn [domain, version, _], acc ->
+    |> Enum.reduce(initial_summary, fn [domain, version], acc ->
       Map.put(acc, String.to_atom(domain), version)
     end)
   end

@@ -21,11 +21,11 @@ defmodule Test.Feeb.DB.Prop do
     File.rm(prop_path)
 
     # Create them (in data dir)
-    Feeb.DB.begin(ctx_name, 0, :write)
+    Feeb.DB.begin(ctx_name, -99, :write)
     Feeb.DB.commit()
 
     # Make sure the DB in datadir is synced
-    db_path = Feeb.DB.Repo.get_path(ctx_name, 0)
+    db_path = Feeb.DB.Repo.get_path(ctx_name, -99)
     {:ok, db_conn} = SQLite.open(db_path)
     :ok = SQLite.exec(db_conn, "PRAGMA wal_checkpoint(TRUNCATE)")
     SQLite.close(db_conn)

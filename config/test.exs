@@ -28,4 +28,6 @@ config :feebdb,
     }
   }
 
+config :feebdb, :adapters, file: Feeb.Adapters.FileMock
+
 config :logger, level: :warning

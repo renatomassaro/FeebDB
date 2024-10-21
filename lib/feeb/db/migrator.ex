@@ -1,7 +1,7 @@
 defmodule Feeb.DB.Migrator do
   require Logger
   alias Feeb.DB.{Config, SQLite}
-  alias Feeb.DB.Migrator.Metadata
+  alias Feeb.DB.Migrator.{Metadata, Parser}
 
   @env Mix.env()
 
@@ -73,13 +73,34 @@ defmodule Feeb.DB.Migrator do
     migrations = get_all_migrations()
 
     Enum.each(domains_to_migrate, fn {domain, cur_v, latest_v} ->
-      Enum.each((cur_v + 1)..latest_v, fn v ->
-        apply_migration!(conn, migrations, domain, v)
-        Metadata.insert_migration(conn, domain, v)
-      end)
+      if cur_v < latest_v do
+        missing_versions =
+          migrations
+          |> Map.fetch!(domain)
+          |> Map.keys()
+          |> Enum.reject(fn v -> v <= cur_v end)
+          |> Enum.sort()
+
+        migrate_next(conn, migrations, domain, missing_versions)
+      else
+        :noop
+      end
     end)
   end
 
+  defp migrate_next(conn, migrations, domain, [v | next_migrations]) do
+    apply_migration!(conn, migrations, domain, v)
+    Metadata.insert_migration(conn, domain, v)
+
+    # Keep migrating until all missing migrations are applied
+    migrate_next(conn, migrations, domain, next_migrations)
+  end
+
+  defp migrate_next(_, _, _, []), do: :ok
+
+  # NOTE: Performance-wise, this is a low hanging fruit. While `queries_from_sql_lines/1` could
+  # be substantially improved, it is fast enough. However, imagine one is migrating thousands of
+  # shards. The migrations will be parsed again for each shard. We'd benefit from some cache.
   defp apply_migration!(conn, migrations, domain, v) do
     migration = get_in(migrations, [domain, v])
 
@@ -89,7 +110,8 @@ defmodule Feeb.DB.Migrator do
 
         # Simply run the sql file directly, line by line
         sql_file
-        |> queries_from_sql_file()
+        |> File.read!()
+        |> Parser.queries_from_sql_lines()
         |> Enum.each(fn query -> SQLite.raw!(conn, query) end)
 
       {:exs_only, _path} ->
@@ -106,86 +128,14 @@ defmodule Feeb.DB.Migrator do
     end
   end
 
-  # TODO: This breaks when there are comments at the middle of a query
-  defp queries_from_sql_file(path) do
-    # NOTE: This entire function is such a hack... but it works.
-    # Despite not being tested directly, it is indirectly tested.
-    file_without_comments = fn lines ->
-      all_comments =
-        lines
-        |> String.split("\n")
-        |> Enum.reject(fn line -> not String.contains?(line, "--") end)
-        |> Enum.map(fn line ->
-          if String.contains?(line, ";") do
-            raise "TODO"
-          else
-            line
-          end
-        end)
-
-      Enum.reduce(all_comments, lines, fn comment, acc ->
-        String.replace(acc, comment, "")
-      end)
-    end
-
-    path
-    |> File.read!()
-    |> file_without_comments.()
-    |> String.split(";\n")
-    |> Enum.reduce([], fn row, acc ->
-      case String.split(row, "\n\n") do
-        [one] -> [one | acc]
-        [one, ""] -> [one | acc]
-        [one, two] -> [two | [one, acc]]
-        [one, two, three] -> [three | [two | [one, acc]]]
-      end
-    end)
-    |> List.flatten()
-    |> Enum.reverse()
-    |> Enum.map(fn sql -> sql |> String.replace("\n", "") end)
-    |> Enum.reject(fn sql -> sql == "" or String.starts_with?(sql, "--") end)
-  end
-
-  # Maybe move below to metadata as well
-
-  # `migrations_dir` can be removed now that we have Config, but make sure it follows the same
-  # logic as before
-  def migrations_dir do
-    Config.migrations_path()
-  end
-
-  # def migrations_dir do
-  #   cond do
-  #     test_dir = Process.get(:db_migrations_dir, false) ->
-  #       if @env == :prod, do: raise("Unexpected migrations dir")
-  #       Logger.warning("Using custom migrations dir: #{test_dir}")
-  #       test_dir
-
-  #     not is_nil(@config_migrations_path) ->
-  #       @config_migrations_path
-
-  #     true ->
-  #       @default_migrations_path
-  #   end
-  # end
-
   @doc """
   Returns a map with all migrations and the corresponding .exs and/or .sql
   files. Notice that the result of this function is the same for every shard,
   regardless of their version. As such, it may make sense to memoize its result.
   """
   def calculate_all_migrations do
-    paths = [migrations_dir()] |> Enum.uniq()
-
-    # paths =
-    #   if @env == :test do
-    #     [@default_migrations_path] ++ [migrations_dir()]
-    #   else
-    #     [@default_migrations_path]
-    #   end
-    #   |> Enum.uniq()
-
-    paths
+    [Config.migrations_path()]
+    |> Enum.uniq()
     |> Enum.map(fn path -> calculate_all_migrations(path) end)
     |> Enum.reduce(%{}, fn migs, acc ->
       Map.merge(migs, acc)
@@ -212,7 +162,6 @@ defmodule Feeb.DB.Migrator do
 
       {String.to_atom(domain), version, path}
     end)
-    |> Enum.sort_by(fn {_, v, _} -> v end)
     |> Enum.group_by(fn {domain, _, _} -> domain end)
     |> Enum.map(fn {domain, domain_entries} ->
       entries =
