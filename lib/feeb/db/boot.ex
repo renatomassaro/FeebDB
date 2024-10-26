@@ -44,10 +44,19 @@ defmodule Feeb.DB.Boot do
     Migrator.setup()
 
     Enum.each(Config.contexts(), fn context ->
+      # Make sure the context is fully set up and ready to migrate shards
+      bootstrap_context(context)
+
+      # Migrate all shards (global, setup and application ones)
       :done = migrate_global_shards(context)
       :done = migrate_setup_shards(context)
       :done = migrate_application_shards(context)
     end)
+  end
+
+  defp bootstrap_context(context) do
+    context_data_path = "#{Config.data_dir()}/#{context.name}/"
+    File.mkdir_p(context_data_path)
   end
 
   defp migrate_global_shards(%{shard_type: :global} = context) do
