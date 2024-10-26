@@ -8,9 +8,6 @@ defmodule Mix.Tasks.FeebDb.MigrateTest do
 
   describe "run/1" do
     test "migrates all shards", %{db: db} = ctx do
-      # We are using a `raw` DB, meaning it has nothing in it (100% fresh DB)
-      assert ctx.db_context == :raw
-
       # Every test has the capability to create its own shard, which is fully isolated from any
       # other test. As scuh, it's very common for me to not close/release/commit connections that
       # were opened during the test, resulting in these shards being effectively locked.
@@ -28,7 +25,10 @@ defmodule Mix.Tasks.FeebDb.MigrateTest do
       "#{Config.data_dir()}/**/*.db"
       |> Path.wildcard()
       |> Enum.reject(fn path -> path == db end)
-      |> Enum.map(fn path -> File.rm(path) end)
+      |> Enum.each(fn path -> File.rm(path) end)
+
+      # We are using a `raw` DB, meaning it has nothing in it (100% fresh DB)
+      assert ctx.db_context == :raw
 
       # Proof: users/sessions tables from lobby are not present:
       conn = open_conn(db)
