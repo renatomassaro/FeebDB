@@ -2,7 +2,7 @@ defmodule Feeb.DB.RepoTest do
   use Test.Feeb.DBCase, async: true
 
   alias GenServer, as: GS
-  alias Feeb.DB.{Repo, SQLite}
+  alias Feeb.DB.{Config, Repo, SQLite}
 
   @context :test
 
@@ -64,6 +64,21 @@ defmodule Feeb.DB.RepoTest do
       assert {:error, reason} = SQLite.raw(c, "DELETE FROM friends WHERE id = 1")
 
       assert reason =~ "attempt to write a readonly database"
+    end
+  end
+
+  describe "init/1" do
+    test "upon error, describes what went wrong (missing file)" do
+      shard_id = 123
+      db = Path.join(Config.data_dir(), "/not_a_context/#{shard_id}.db")
+
+      %{message: reason} =
+        assert_raise RuntimeError, fn ->
+          Repo.init({@context, 123, db, :readwrite})
+        end
+
+      assert reason =~ "Unable to open database"
+      assert reason =~ "Database file #{db} does not exist"
     end
   end
 
