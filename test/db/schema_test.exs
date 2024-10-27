@@ -65,7 +65,7 @@ defmodule DB.SchemaTest do
 
   describe "generated: __virtual_cols__/0" do
     test "includes all virtual fields" do
-      assert [:divorce_count] == Friend.__virtual_cols__()
+      assert [:divorce_count, :repo_config] == Friend.__virtual_cols__() |> Enum.sort()
       assert [] == AllTypes.__virtual_cols__()
     end
   end
@@ -101,11 +101,26 @@ defmodule DB.SchemaTest do
 
       ross = DB.one({:friends, :get_by_name}, "Ross")
       phoebe = DB.one({:friends, :get_by_name}, "Phoebe")
+      rachel = DB.one({:friends, :get_by_name}, "Rachel")
       monica = DB.one({:friends, :get_by_name}, "Monica")
 
       assert ross.divorce_count == 3
       assert phoebe.divorce_count == 1
+      assert rachel.divorce_count == 1
       assert monica.divorce_count == 0
+
+      expected_repo_config =
+        %{
+          context: @context,
+          shard_id: shard_id,
+          mode: :readonly,
+          path: DB.Repo.get_path(@context, shard_id)
+        }
+
+      assert ross.repo_config == expected_repo_config
+      assert phoebe.repo_config == expected_repo_config
+      assert rachel.repo_config == expected_repo_config
+      assert monica.repo_config == expected_repo_config
     end
   end
 end

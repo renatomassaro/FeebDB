@@ -367,10 +367,12 @@ defmodule Feeb.DB.Schema do
   defp add_virtual_fields(struct, [], _), do: struct
 
   defp add_virtual_fields(struct, virtual_fields, schema) do
+    repo_config = Process.get(:repo_config)
+
     Enum.reduce(virtual_fields, struct, fn field_name, acc ->
       {_, %{virtual: virtual_fn}, _} = Map.fetch!(schema, field_name)
 
-      value = apply(struct.__struct__, virtual_fn, [struct])
+      value = apply(struct.__struct__, virtual_fn, [struct, repo_config])
       Map.put(acc, field_name, value)
     end)
   end

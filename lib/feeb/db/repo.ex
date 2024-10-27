@@ -42,6 +42,10 @@ defmodule Feeb.DB.Repo do
           transaction_id: nil
         }
 
+        # `repo_config` is metadata that the Schema has access to when building virtual fields
+        repo_config = Map.drop(state, [:transaction_id, :conn])
+        Process.put(:repo_config, repo_config)
+
         {:ok, state, {:continue, :bootstrap}}
 
       {:error, :database_open_failed} ->
