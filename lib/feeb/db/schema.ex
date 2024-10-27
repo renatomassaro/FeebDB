@@ -246,7 +246,7 @@ defmodule Feeb.DB.Schema do
   end
 
   def from_row(model, fields, row) do
-    table_fields = get_table_fields(model)
+    table_fields = model.__cols__()
     fields_to_populate = if fields == [:*], do: table_fields, else: fields
 
     # TODO: Test this a lot...
@@ -330,10 +330,6 @@ defmodule Feeb.DB.Schema do
       |> Map.put(:errors, [{field, error} | schema.__meta__[:errors] || []])
 
     %{schema | __meta__: new_meta}
-  end
-
-  defp get_table_fields(model) do
-    :persistent_term.get({:db_table_fields, model})
   end
 
   def set_private(%{__private__: private} = schema, k, v) do
