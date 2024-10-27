@@ -30,18 +30,32 @@ defmodule Feeb.DB.Repo do
   def init({context, shard_id, path, mode}) do
     Logger.info("Starting #{mode} repo for shard #{shard_id}@#{context}")
     true = mode in [:readwrite, :readonly]
-    {:ok, conn} = SQLite.open(path)
 
-    state = %{
-      context: context,
-      shard_id: shard_id,
-      mode: mode,
-      path: path,
-      conn: conn,
-      transaction_id: nil
-    }
+    case SQLite.open(path) do
+      {:ok, conn} ->
+        state = %{
+          context: context,
+          shard_id: shard_id,
+          mode: mode,
+          path: path,
+          conn: conn,
+          transaction_id: nil
+        }
 
-    {:ok, state, {:continue, :bootstrap}}
+        {:ok, state, {:continue, :bootstrap}}
+
+      {:error, :database_open_failed} ->
+        reason =
+          case File.stat(path) do
+            {:error, :enoent} ->
+              "Database file #{path} does not exist"
+
+            _ ->
+              "Unknown reason"
+          end
+
+        raise "Unable to open database #{inspect({context, shard_id, path, mode})}: #{reason}"
+    end
   end
 
   # Bootstrap
