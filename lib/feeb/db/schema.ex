@@ -57,11 +57,16 @@ defmodule Feeb.DB.Schema do
 
       normalized_schema = Map.new(ordered_schema)
 
-      sorted_keys = Enum.map(ordered_schema, fn {col, _} -> col end)
+      {reverse_sorted_cols, virtual_cols} =
+        Enum.reduce(ordered_schema, {[], []}, fn {col, {_, opts, _}}, {acc_sorted, acc_virtual} ->
+          if opts[:virtual] do
+            {acc_sorted, [col | acc_virtual]}
+          else
+            {[col | acc_sorted], acc_virtual}
+          end
+        end)
 
-      if is_nil(Module.get_attribute(__MODULE__, :derived_fields)) do
-        @derived_fields []
-      end
+      sorted_cols = Enum.reverse(reverse_sorted_cols)
 
       modded_fields =
         normalized_schema
@@ -71,14 +76,20 @@ defmodule Feeb.DB.Schema do
 
       @schema normalized_schema
       @modded_fields modded_fields
-      @sorted_keys sorted_keys
+      @sorted_cols sorted_cols
+      @virtual_cols virtual_cols
+
+      if is_nil(Module.get_attribute(__MODULE__, :derived_fields)) do
+        @derived_fields []
+      end
 
       defstruct Map.keys(@schema) ++ unquote(meta_keys)
 
       # TODO: Inline?
       # TODO: This may be simplified if I register thsi attr as persist: true
       def __schema__, do: @schema
-      def __cols__, do: @sorted_keys
+      def __cols__, do: @sorted_cols
+      def __virtual_cols__, do: @virtual_cols
       def __table__, do: @table
       def __context__, do: @context
       def __modded_fields__, do: @modded_fields
@@ -246,7 +257,9 @@ defmodule Feeb.DB.Schema do
   end
 
   def from_row(model, fields, row) do
+    schema = model.__schema__()
     table_fields = model.__cols__()
+    virtual_fields = model.__virtual_cols__()
     fields_to_populate = if fields == [:*], do: table_fields, else: fields
 
     # TODO: Test this a lot...
@@ -274,8 +287,6 @@ defmodule Feeb.DB.Schema do
       raise "Row results do not match with fields to populate: #{details}"
     end
 
-    schema = model.__schema__()
-
     values =
       fields_to_populate
       |> Enum.zip(row)
@@ -288,6 +299,7 @@ defmodule Feeb.DB.Schema do
     |> struct(values)
     |> Map.put(:__meta__, %{origin: :db})
     |> add_missing_values(table_fields, fields_to_populate)
+    |> add_virtual_fields(virtual_fields, schema)
   end
 
   def cast_value!(schema_mod, schema, field, raw_value) do
@@ -350,5 +362,16 @@ defmodule Feeb.DB.Schema do
       end)
 
     Kernel.struct(struct, values)
+  end
+
+  defp add_virtual_fields(struct, [], _), do: struct
+
+  defp add_virtual_fields(struct, virtual_fields, schema) do
+    Enum.reduce(virtual_fields, struct, fn field_name, acc ->
+      {_, %{virtual: virtual_fn}, _} = Map.fetch!(schema, field_name)
+
+      value = apply(struct.__struct__, virtual_fn, [struct])
+      Map.put(acc, field_name, value)
+    end)
   end
 end

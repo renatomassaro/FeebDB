@@ -2,9 +2,16 @@ defmodule DB.SchemaTest do
   use Test.Feeb.DBCase, async: true
 
   alias Feeb.DB, as: DB
-  alias Sample.{Friend}
+  alias Sample.{AllTypes, Friend}
 
   @context :test
+
+  describe "generated: __virtual_cols__/0" do
+    test "includes all virtual fields" do
+      assert [:divorce_count] == Friend.__virtual_cols__()
+      assert [] == AllTypes.__virtual_cols__()
+    end
+  end
 
   describe "basic functionalities" do
     test "schema is created correctly when selecting data", %{shard_id: shard_id} do
@@ -28,6 +35,20 @@ defmodule DB.SchemaTest do
       # They have different metadata though
       assert inserted_friend.__meta__.origin == :db
       assert friend.__meta__.origin == :application
+    end
+  end
+
+  describe "virtual fields" do
+    test "virtual fields are computed and added to the result", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :read)
+
+      ross = DB.one({:friends, :get_by_name}, "Ross")
+      phoebe = DB.one({:friends, :get_by_name}, "Phoebe")
+      monica = DB.one({:friends, :get_by_name}, "Monica")
+
+      assert ross.divorce_count == 3
+      assert phoebe.divorce_count == 1
+      assert monica.divorce_count == 0
     end
   end
 end
