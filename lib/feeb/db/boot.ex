@@ -195,7 +195,6 @@ defmodule Feeb.DB.Boot do
     |> Enum.each(fn {_, modules_details} ->
       Enum.each(modules_details, fn model ->
         save_model(model)
-        save_table_fields(model)
       end)
     end)
 
@@ -212,7 +211,6 @@ defmodule Feeb.DB.Boot do
           # with the `ctx_name` defined in the configuration settings
           new_model = {ctx_name, model, table, schema}
           save_model(new_model)
-          save_table_fields(new_model)
         end)
       end)
     end)
@@ -229,19 +227,22 @@ defmodule Feeb.DB.Boot do
     end)
   end
 
-  defp validate_table_info!({model, context, _table, schema}, table_info) do
+  defp validate_table_info!({context, model, _table, schema}, table_info) do
+    # Fields defined in the Schema (not counting virtual ones)
+    schema_table_fields = model.__cols__()
+
+    # Fields found in the database
     table_fields =
       Enum.map(table_info, fn [_, field, _, _, _, _] ->
         String.to_atom(field)
       end)
 
-    if length(table_fields) != length(Map.keys(schema)) do
-      schema_fields = Map.keys(schema)
-
+    # They should match. If they don't, one of the two is out-of-sync
+    if length(table_fields) != length(schema_table_fields) do
       extra_fields =
-        if length(table_fields) > length(schema_fields),
-          do: table_fields -- schema_fields,
-          else: schema_fields -- table_fields
+        if length(table_fields) > length(schema_table_fields),
+          do: table_fields -- schema_table_fields,
+          else: schema_table_fields -- table_fields
 
       "Schema fields and #{context}@#{model} fields do not match: #{inspect(extra_fields)}"
       |> raise()
@@ -275,11 +276,6 @@ defmodule Feeb.DB.Boot do
           raise "Type mismatch: #{sqlite_type}/#{field_type} for #{field} @ #{model}"
       end
     end)
-  end
-
-  defp save_table_fields({_context, model, _table, _schema}) do
-    fields = model.__cols__()
-    :persistent_term.put({:db_table_fields, model}, fields)
   end
 
   defp save_model({context, model, table, _}) do
