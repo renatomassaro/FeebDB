@@ -117,19 +117,20 @@ defmodule Feeb.DB.RepoTest do
     test "returns the corresponding result", %{repo: repo} do
       q = {:friends, :get_by_id}
 
-      assert {:ok, %{id: 1, name: "Phoebe"}} = GS.call(repo, {:query, :one, q, [1]})
+      assert {:ok, %{id: 1, name: "Phoebe"}} = GS.call(repo, {:query, :one, q, [1], []})
 
-      assert {:ok, nil} == GS.call(repo, {:query, :one, q, [9]})
+      assert {:ok, nil} == GS.call(repo, {:query, :one, q, [9], []})
     end
 
     @tag capture_log: true
     test "handles errors", %{repo: repo} do
       # Multiple results being returned at once
-      assert {:error, :multiple_results} = GS.call(repo, {:query, :one, {:friends, :get_all}, []})
+      assert {:error, :multiple_results} =
+               GS.call(repo, {:query, :one, {:friends, :get_all}, [], []})
 
       # Wrong number of bindings
       assert {:error, :arguments_wrong_length} =
-               GS.call(repo, {:query, :one, {:friends, :get_by_id}, [1, 2]})
+               GS.call(repo, {:query, :one, {:friends, :get_by_id}, [1, 2], []})
     end
   end
 

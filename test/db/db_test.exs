@@ -2,7 +2,7 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
-  alias Sample.Post
+  alias Sample.{AllTypes, Post}
 
   @context :test
 
@@ -287,12 +287,96 @@ defmodule Feeb.DBTest do
       assert nil == DB.one({:friends, :get_by_id}, [0])
     end
 
+    test "supports the :format flag", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{atom: :i_am_atom, integer: 50, map_keys_atom: %{foo: "bar"}}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      # Without the flag, we get the full object. Unselected fields are shown as `NotLoaded`
+      assert %AllTypes{atom: :i_am_atom, string: string} =
+               DB.one({:all_types, :get_atom_and_integer}, [])
+
+      assert string == %DB.Value.NotLoaded{}
+
+      # With the :raw flag, we return the values as they are stored in the database
+      assert ["i_am_atom", 50] == DB.one({:all_types, :get_atom_and_integer}, [], format: :raw)
+      assert ["{\"foo\":\"bar\"}"] == DB.one({:all_types, :get_map_keys_atom}, [], format: :raw)
+
+      # With the :type flag, we return the values formatted by their types _without_ the full schema
+      assert %{map_keys_atom: %{foo: "bar"}} ==
+               DB.one({:all_types, :get_map_keys_atom}, [], format: :type)
+
+      assert %{atom: :i_am_atom, integer: 50} ==
+               DB.one({:all_types, :get_atom_and_integer}, [], format: :type)
+    end
+
+    test "works with window functions when using :raw flag", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{integer: 666}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      %{integer: 2}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      %{integer: 1}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      # NOTE: Currently, this is the only way to work with window functions: by not formatting it
+      assert [666] == DB.one({:all_types, :get_max_integer}, [], format: :raw)
+      assert [669] == DB.one({:all_types, :get_sum_integer}, [], format: :raw)
+    end
+
     test "raises if multiple results are found", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :read)
 
       assert_raise RuntimeError, fn ->
         DB.one({:friends, :get_all})
       end
+    end
+  end
+
+  describe "all/3" do
+    test "supports the :format flag", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{atom: :i_am_atom, integer: 50, map: %{foo: "bar"}}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      %{atom: :other_atom, integer: -2, map: %{girl: ["so", "confusing"]}}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      # Without the flag, we get the full object. Unselected fields are shown as `NotLoaded`
+      assert [res_1, res_2] = DB.all({:all_types, :get_atom_and_integer}, [])
+      assert :i_am_atom in [res_1.atom, res_2.atom]
+      assert %DB.Value.NotLoaded{} == res_1.string
+
+      # With the :raw flag, we return the values as they are stored in the database
+      assert [["i_am_atom", 50], ["other_atom", -2]] |> Enum.sort() ==
+               DB.all({:all_types, :get_atom_and_integer}, [], format: :raw) |> Enum.sort()
+
+      assert [["{\"foo\":\"bar\"}"], ["{\"girl\":[\"so\",\"confusing\"]}"]] |> Enum.sort() ==
+               DB.all({:all_types, :get_map}, [], format: :raw) |> Enum.sort()
+
+      # With the :type flag, we return the values formatted by their types _without_ the full schema
+      assert [%{map: %{"girl" => ["so", "confusing"]}}, %{map: %{"foo" => "bar"}}] |> Enum.sort() ==
+               DB.all({:all_types, :get_map}, [], format: :type) |> Enum.sort()
+
+      assert [%{atom: :i_am_atom, integer: 50}, %{atom: :other_atom, integer: -2}] |> Enum.sort() ==
+               DB.all({:all_types, :get_atom_and_integer}, [], format: :type) |> Enum.sort()
     end
   end
 end

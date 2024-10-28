@@ -105,52 +105,52 @@ defmodule Feeb.DB do
     GenServer.call(get_pid!(), {:prepared_raw, sql, bindings, opts})
   end
 
-  def one(partial_or_full_query_id, bindings \\ [])
+  def one(partial_or_full_query_id, bindings \\ [], opts \\ [])
 
   # TODO: See Feeb.DB, I also support `custom_fields`
-  def one({domain, :fetch}, bindings) when is_list(bindings) do
+  def one({domain, :fetch}, bindings, opts) when is_list(bindings) do
     {get_context!(), domain, :__fetch}
     |> Query.get_templated_query_id([], %{})
-    |> one(bindings)
+    |> one(bindings, opts)
   end
 
-  def one({domain, :fetch}, value), do: one({domain, :fetch}, [value])
+  def one({domain, :fetch}, value, opts), do: one({domain, :fetch}, [value], opts)
 
-  def one({domain, query_name}, bindings) when is_list(bindings) do
-    one({get_context!(), domain, query_name}, bindings)
+  def one({domain, query_name}, bindings, opts) when is_list(bindings) do
+    one({get_context!(), domain, query_name}, bindings, opts)
   end
 
-  def one({domain, query_name}, value), do: one({domain, query_name}, [value])
+  def one({domain, query_name}, value, opts), do: one({domain, query_name}, [value], opts)
 
-  def one({_, domain, query_name}, bindings) when is_list(bindings) do
-    case GenServer.call(get_pid!(), {:query, :one, {domain, query_name}, bindings}) do
+  def one({_, domain, query_name}, bindings, opts) when is_list(bindings) do
+    case GenServer.call(get_pid!(), {:query, :one, {domain, query_name}, bindings, opts}) do
       {:ok, r} -> r
       {:error, :multiple_results} -> raise "MultipleResultsError"
     end
   end
 
-  def one!(query_id, bindings \\ []) do
-    r = one(query_id, bindings)
+  def one!(query_id, bindings \\ [], opts \\ []) do
+    r = one(query_id, bindings, opts)
     true = not is_nil(r)
     r
   end
 
-  def all(partial_or_full_query_id, bindings \\ [])
+  def all(partial_or_full_query_id, bindings \\ [], opts \\ [])
 
-  def all(schema, _bindings) when is_atom(schema) do
+  def all(schema, _bindings, opts) when is_atom(schema) do
     {get_context!(), schema.__table__(), :__all}
     |> Query.get_templated_query_id(:all, %{})
-    |> all([])
+    |> all([], opts)
   end
 
-  def all({domain, query_name}, bindings) do
-    all({get_context!(), domain, query_name}, bindings)
+  def all({domain, query_name}, bindings, opts) do
+    all({get_context!(), domain, query_name}, bindings, opts)
   end
 
-  def all({_, domain, query_name}, bindings) do
+  def all({_, domain, query_name}, bindings, opts) do
     bindings = if is_list(bindings), do: bindings, else: [bindings]
 
-    case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings}) do
+    case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings, opts}) do
       {:ok, rows} -> rows
       {:error, reason} -> raise reason
     end

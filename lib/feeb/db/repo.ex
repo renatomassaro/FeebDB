@@ -204,7 +204,7 @@ defmodule Feeb.DB.Repo do
 
   # Queries (SELECT/UPDATE/INSERT/DELETE)
 
-  def handle_call({:query, type, {domain, query_name}, bindings_values}, _from, state) do
+  def handle_call({:query, type, {domain, query_name}, bindings_values, opts}, _from, state) do
     query_id = {state.context, domain, query_name}
     {sql, _, _} = query = Query.fetch!(query_id)
 
@@ -212,8 +212,7 @@ defmodule Feeb.DB.Repo do
          true = stmt_sql == sql,
          :ok <- SQLite.bind(state.conn, stmt, bindings_values),
          {:ok, rows} <- SQLite.all(state.conn, stmt) do
-      # IO.inspect(rows)
-      result = format_result(type, query_id, query, rows, bindings_values)
+      result = format_result(type, query_id, query, rows, bindings_values, opts[:format] || :schema)
       {:reply, result, state}
     else
       {:error, _} = err ->
@@ -251,21 +250,30 @@ defmodule Feeb.DB.Repo do
     end
   end
 
-  defp format_result(:one, query_id, query, [row], _) do
-    {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
-  end
+  defp format_result(:one, _, _, [row], _, :raw), do: {:ok, row}
 
-  defp format_result(:one, _, _, [], _), do: {:ok, nil}
-  defp format_result(:one, _, _, [_ | _], _), do: {:error, :multiple_results}
+  defp format_result(:one, query_id, query, [row], _, :type),
+    do: {:ok, create_types_from_rows(query_id, query, [row]) |> List.first()}
 
-  defp format_result(:all, _, _, [], _), do: {:ok, []}
+  defp format_result(:one, query_id, query, [row], _, _),
+    do: {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
 
-  defp format_result(:all, query_id, query, rows, _) do
-    {:ok, create_schema_from_rows(query_id, query, rows)}
-  end
+  defp format_result(:one, _, _, [], _, _), do: {:ok, nil}
+  defp format_result(:one, _, _, [_ | _], _, _), do: {:error, :multiple_results}
+
+  defp format_result(:all, _, _, [], _, _), do: {:ok, []}
+  defp format_result(:all, _, _, rows, _, :raw), do: {:ok, rows}
+
+  defp format_result(:all, query_id, query, rows, _, :type),
+    do: {:ok, create_types_from_rows(query_id, query, rows)}
+
+  defp format_result(:all, query_id, query, rows, _, :schema),
+    do: {:ok, create_schema_from_rows(query_id, query, rows)}
+
+  defp format_result(:insert, _, _, [], _, format) when format in [:raw, :type], do: {:ok, nil}
 
   # TODO: Test with/without returning *
-  defp format_result(:insert, query_id, query, [], bindings) do
+  defp format_result(:insert, query_id, query, [], bindings, :schema) do
     # We inserted a row without RETURNING *. We'll then recreate the row optimistically in
     # the sense that we hope both will yield the same result. And that's mostly true
     # except for any data transformation that happens at the SQLite layer. Since we almost
@@ -273,11 +281,10 @@ defmodule Feeb.DB.Repo do
     {:ok, create_schema_from_rows(query_id, query, [bindings]) |> List.first()}
   end
 
-  defp format_result(:insert, query_id, query, [row], _bindings) do
-    {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
-  end
+  defp format_result(:insert, query_id, query, [row], _bindings, :schema),
+    do: {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
 
-  defp format_result(:update, _, _, [], _bindings) do
+  defp format_result(:update, _, _, [], _bindings, _) do
     # We update a row without RETURNING *. See comment in the `insert` branch, with the
     # caveat that for updates we don't have access to all values, only to the values that
     # got updated. Therefore, we return `nil` by default to avoid wrong expectations. If
@@ -286,7 +293,7 @@ defmodule Feeb.DB.Repo do
     {:ok, nil}
   end
 
-  defp format_result(:delete, _, _, [], _bindings), do: {:ok, []}
+  defp format_result(:delete, _, _, [], _bindings, _), do: {:ok, []}
 
   defp create_schema_from_rows({_, :pragma, _}, _, rows), do: rows
 
@@ -298,6 +305,13 @@ defmodule Feeb.DB.Repo do
   defp create_schema_from_rows(query_id, {_, {_, params_bindings}, :insert}, rows) do
     model = get_model_from_query_id(query_id)
     Enum.map(rows, fn row -> Schema.from_row(model, params_bindings, row) end)
+  end
+
+  defp create_types_from_rows(query_id, {_, {fields_bindings, _}, :select} = query, rows) do
+    # Performance-wise, not the best solution, but I'd rather keep the code readable for a bit
+    # longer. Simply create the full schema and use only the fields the user selected
+    create_schema_from_rows(query_id, query, rows)
+    |> Enum.map(fn full_result -> Map.take(full_result, fields_bindings) end)
   end
 
   # Used by `prepared_raw` exclusively
