@@ -105,52 +105,52 @@ defmodule Feeb.DB do
     GenServer.call(get_pid!(), {:prepared_raw, sql, bindings, opts})
   end
 
-  def one(partial_or_full_query_id, bindings \\ [])
+  def one(partial_or_full_query_id, bindings \\ [], opts \\ [])
 
   # TODO: See Feeb.DB, I also support `custom_fields`
-  def one({domain, :fetch}, bindings) when is_list(bindings) do
+  def one({domain, :fetch}, bindings, opts) when is_list(bindings) do
     {get_context!(), domain, :__fetch}
     |> Query.get_templated_query_id([], %{})
-    |> one(bindings)
+    |> one(bindings, opts)
   end
 
-  def one({domain, :fetch}, value), do: one({domain, :fetch}, [value])
+  def one({domain, :fetch}, value, opts), do: one({domain, :fetch}, [value], opts)
 
-  def one({domain, query_name}, bindings) when is_list(bindings) do
-    one({get_context!(), domain, query_name}, bindings)
+  def one({domain, query_name}, bindings, opts) when is_list(bindings) do
+    one({get_context!(), domain, query_name}, bindings, opts)
   end
 
-  def one({domain, query_name}, value), do: one({domain, query_name}, [value])
+  def one({domain, query_name}, value, opts), do: one({domain, query_name}, [value], opts)
 
-  def one({_, domain, query_name}, bindings) when is_list(bindings) do
-    case GenServer.call(get_pid!(), {:query, :one, {domain, query_name}, bindings}) do
+  def one({_, domain, query_name}, bindings, opts) when is_list(bindings) do
+    case GenServer.call(get_pid!(), {:query, :one, {domain, query_name}, bindings, opts}) do
       {:ok, r} -> r
       {:error, :multiple_results} -> raise "MultipleResultsError"
     end
   end
 
-  def one!(query_id, bindings \\ []) do
-    r = one(query_id, bindings)
+  def one!(query_id, bindings \\ [], opts \\ []) do
+    r = one(query_id, bindings, opts)
     true = not is_nil(r)
     r
   end
 
-  def all(partial_or_full_query_id, bindings \\ [])
+  def all(partial_or_full_query_id, bindings \\ [], opts \\ [])
 
-  def all(schema, _bindings) when is_atom(schema) do
+  def all(schema, _bindings, opts) when is_atom(schema) do
     {get_context!(), schema.__table__(), :__all}
     |> Query.get_templated_query_id(:all, %{})
-    |> all([])
+    |> all([], opts)
   end
 
-  def all({domain, query_name}, bindings) do
-    all({get_context!(), domain, query_name}, bindings)
+  def all({domain, query_name}, bindings, opts) do
+    all({get_context!(), domain, query_name}, bindings, opts)
   end
 
-  def all({_, domain, query_name}, bindings) do
+  def all({_, domain, query_name}, bindings, opts) do
     bindings = if is_list(bindings), do: bindings, else: [bindings]
 
-    case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings}) do
+    case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings, opts}) do
       {:ok, rows} -> rows
       {:error, reason} -> raise reason
     end
@@ -159,20 +159,22 @@ defmodule Feeb.DB do
   def insert(%schema{} = struct) do
     {get_context!(), schema.__table__(), :__insert}
     |> Query.get_templated_query_id(:all, %{schema: schema})
-    |> insert(struct)
+    |> insert(struct, [])
   end
 
-  def insert({domain, query_name}, %_{} = struct) do
-    insert({get_context!(), domain, query_name}, struct)
+  def insert(partial_or_full_query_id, struct, opts \\ [])
+
+  def insert({domain, query_name}, %_{} = struct, opts) do
+    insert({get_context!(), domain, query_name}, struct, opts)
   end
 
-  def insert({_, domain, query_name} = full_query_id, %_{} = struct) do
+  def insert({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
     # TODO: Make it more friendly
     true = :application == struct.__meta__.origin
 
     if struct.__meta__.valid? do
       bindings = get_bindings(full_query_id, struct)
-      GenServer.call(get_pid!(), {:query, :insert, {domain, query_name}, bindings})
+      GenServer.call(get_pid!(), {:query, :insert, {domain, query_name}, bindings, opts})
     else
       {:error, "Cast error: #{inspect(struct.__meta__.errors)}"}
     end
@@ -183,8 +185,8 @@ defmodule Feeb.DB do
     r
   end
 
-  def insert!(query, struct) do
-    {:ok, r} = insert(query, struct)
+  def insert!(query, struct, opts \\ []) do
+    {:ok, r} = insert(query, struct, opts)
     r
   end
 
@@ -192,19 +194,21 @@ defmodule Feeb.DB do
   def update(%schema{} = struct) do
     {get_context!(), schema.__table__(), :__update}
     |> Query.get_templated_query_id(struct.__meta__.target, %{})
-    |> update(struct)
+    |> update(struct, [])
   end
 
-  def update({domain, query_name}, %_{} = struct) do
-    update({get_context!(), domain, query_name}, struct)
+  def update(partial_or_full_query_id, struct, opts \\ [])
+
+  def update({domain, query_name}, %_{} = struct, opts) do
+    update({get_context!(), domain, query_name}, struct, opts)
   end
 
-  def update({_, domain, query_name} = full_query_id, %_{} = struct) do
+  def update({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
     # TODO: Make it more friendly
     true = :db == struct.__meta__.origin
 
     bindings = get_bindings(full_query_id, struct)
-    GenServer.call(get_pid!(), {:query, :update, {domain, query_name}, bindings})
+    GenServer.call(get_pid!(), {:query, :update, {domain, query_name}, bindings, opts})
   end
 
   def update!(struct) do
@@ -212,8 +216,8 @@ defmodule Feeb.DB do
     r
   end
 
-  def update!(query_id, struct) do
-    {:ok, r} = update(query_id, struct)
+  def update!(query_id, struct, opts \\ []) do
+    {:ok, r} = update(query_id, struct, opts)
     r
   end
 
@@ -221,19 +225,21 @@ defmodule Feeb.DB do
   def delete(%schema{} = struct) do
     {get_context!(), schema.__table__(), :__delete}
     |> Query.get_templated_query_id([], %{})
-    |> update(struct)
+    |> update(struct, [])
   end
 
-  def delete({domain, query_name}, %_{} = struct) do
-    delete({get_context!(), domain, query_name}, struct)
+  def delete(partial_or_full_query_id, struct, opts \\ [])
+
+  def delete({domain, query_name}, %_{} = struct, opts) do
+    delete({get_context!(), domain, query_name}, struct, opts)
   end
 
-  def delete({_, domain, query_name} = full_query_id, %_{} = struct) do
+  def delete({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
     # TODO: Make it more friendly
     true = :db == struct.__meta__.origin
 
     bindings = get_bindings(full_query_id, struct)
-    GenServer.call(get_pid!(), {:query, :delete, {domain, query_name}, bindings})
+    GenServer.call(get_pid!(), {:query, :delete, {domain, query_name}, bindings, opts})
   end
 
   def delete!(struct) do
@@ -241,8 +247,8 @@ defmodule Feeb.DB do
     r
   end
 
-  def delete!(query_id, struct) do
-    {:ok, r} = delete(query_id, struct)
+  def delete!(query_id, struct, opts \\ []) do
+    {:ok, r} = delete(query_id, struct, opts)
     r
   end
 
