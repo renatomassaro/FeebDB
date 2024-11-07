@@ -110,7 +110,8 @@ defmodule Feeb.DB.MigratorTest do
       migrations = Migrator.calculate_all_migrations()
 
       # Mapped all the existing domains/contexts in the migrations folder
-      assert [:crm, :erp, :events, :lobby, :test] = migrations |> Map.keys() |> Enum.sort()
+      assert [:crm, :erp, :events, :lobby, :test, :will_fail] =
+               migrations |> Map.keys() |> Enum.sort()
 
       # There are multiple migrations in lobby
       assert Enum.count(migrations.lobby) == 2
