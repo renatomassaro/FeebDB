@@ -8,21 +8,7 @@ defmodule Mix.Tasks.FeebDb.MigrateTest do
 
   describe "run/1" do
     test "migrates all shards", %{db: db} = ctx do
-      # Every test has the capability to create its own shard, which is fully isolated from any
-      # other test. As scuh, it's very common for me to not close/release/commit connections that
-      # were opened during the test, resulting in these shards being effectively locked.
-      # That's not a problem, since these shards are never to be used inside another test. However,
-      # when triggering `feeb_db.migrate`, we end up migrating every shard that is in the data
-      # directory, many of which are locked because the Repo has an open transaction.
-      # As a workaround, I'm simply deleting every shard (except the one in this test), which is why
-      # this test needs to run with `async: false`.
-      # Note, however, that _even_ if I closed the connections from every test, running _this_ test
-      # with `async: true` would probably result in flakes: it's possible (or, rather, certain) that
-      # some test would have its shard migrated midway, causing inconsistencies or unexpected locks.
-      # In the future, it may make sense to refactor the `feeb_db.migrate` task to accept arguments
-      # that specify a custom data directory. By using a custom data dir, I'd be able to "mock" the
-      # shards without affecting other tests, and then we could use `async: true` here.
-      delete_all_shards_but_this_one(db)
+      Test.Feeb.DB.delete_all_dbs_but_this_one(db)
 
       # We are using a `raw` DB, meaning it has nothing in it (100% fresh DB)
       assert ctx.db_context == :raw
@@ -50,8 +36,7 @@ defmodule Mix.Tasks.FeebDb.MigrateTest do
     end
 
     test "sets up the shard directory (if one doesn't exist)", %{db: db} do
-      # Read comment on test above to understand why we need to do this
-      delete_all_shards_but_this_one(db)
+      Test.Feeb.DB.delete_all_dbs_but_this_one(db)
 
       # Create a `fake_context` that never existed until now
       # Another reason why this suite must run with `async: false`: we are hijacking the config
@@ -70,14 +55,10 @@ defmodule Mix.Tasks.FeebDb.MigrateTest do
       # But it exists after the migration
       assert :ok == MigrateTask.run([])
       assert {:ok, %{type: :directory}} = File.stat(ctx_dir)
-    end
-  end
 
-  defp delete_all_shards_but_this_one(db) do
-    "#{Config.data_dir()}/**/*.db"
-    |> Path.wildcard()
-    |> Enum.reject(fn path -> path == db end)
-    |> Enum.each(fn path -> File.rm(path) end)
+      # Resume the original contexts (other synchronous tests may be affected otherwise)
+      Application.put_env(:feebdb, :contexts, original_contexts)
+    end
   end
 
   defp open_conn(db) do
