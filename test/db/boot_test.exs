@@ -14,7 +14,7 @@ defmodule Feeb.DB.BootTest do
   describe "boot" do
     @tag unit: true
     test "stores migrations in persistent term" do
-      assert [:crm, :erp, :events, :lobby, :test] ==
+      assert [:crm, :erp, :events, :lobby, :test, :will_fail] ==
                Migrator.get_all_migrations() |> Map.keys() |> Enum.sort()
     end
 

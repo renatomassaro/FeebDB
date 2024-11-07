@@ -81,22 +81,24 @@ defmodule Feeb.DB.Migrator do
           |> Enum.reject(fn v -> v <= cur_v end)
           |> Enum.sort()
 
-        migrate_next(conn, migrations, domain, missing_versions)
+        SQLite.raw!(conn, "BEGIN EXCLUSIVE")
+        migrate_next!(conn, migrations, domain, missing_versions)
+        SQLite.raw!(conn, "COMMIT")
       else
         :noop
       end
     end)
   end
 
-  defp migrate_next(conn, migrations, domain, [v | next_migrations]) do
+  defp migrate_next!(conn, migrations, domain, [v | next_migrations]) do
     apply_migration!(conn, migrations, domain, v)
     Metadata.insert_migration(conn, domain, v)
 
     # Keep migrating until all missing migrations are applied
-    migrate_next(conn, migrations, domain, next_migrations)
+    migrate_next!(conn, migrations, domain, next_migrations)
   end
 
-  defp migrate_next(_, _, _, []), do: :ok
+  defp migrate_next!(_, _, _, []), do: :ok
 
   # NOTE: Performance-wise, this is a low hanging fruit. While `queries_from_sql_lines/1` could
   # be substantially improved, it is fast enough. However, imagine one is migrating thousands of
