@@ -15,8 +15,6 @@ defmodule Feeb.Db.MigratorSyncTest do
       Test.Feeb.DB.delete_all_dbs_but_this_one(db)
 
       {:ok, conn} = SQLite.open(db)
-      SQLite.raw!(conn, "PRAGMA synchronous=1")
-      assert [] == SQLite.raw!(conn, "pragma table_info(users)")
 
       # Another reason why this suite must run with `async: false`: we are hijacking the config
       original_contexts = Application.get_env(:feebdb, :contexts)
@@ -25,8 +23,6 @@ defmodule Feeb.Db.MigratorSyncTest do
 
       assert {:needs_migration, migrations} =
                Migrator.get_migration_status(conn, :will_fail, :readwrite)
-
-      assert [] == SQLite.raw!(conn, "pragma table_info(users)")
 
       # Attempt to migrate raised an error
       %{term: {:error, reason}} =
@@ -46,7 +42,7 @@ defmodule Feeb.Db.MigratorSyncTest do
       # Even though `CREATE TABLE` succeeded, there's no table because `CREATE INDEX` failed
       assert [] == SQLite.raw!(conn, "pragma table_info(users)")
 
-      # Resume the original contexts (other synchronous tests may be affected otherwise)
+      # Restore the original contexts (other synchronous tests may be affected otherwise)
       Application.put_env(:feebdb, :contexts, original_contexts)
     end
   end

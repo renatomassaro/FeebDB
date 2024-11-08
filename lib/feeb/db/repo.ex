@@ -208,6 +208,8 @@ defmodule Feeb.DB.Repo do
     query_id = {state.context, domain, query_name}
     {sql, _, _} = query = Query.fetch!(query_id)
 
+    bindings_values = normalize_bindings_values(bindings_values)
+
     with {:ok, {stmt, stmt_sql}} <- prepare_query(state, query_id, sql),
          true = stmt_sql == sql,
          :ok <- SQLite.bind(state.conn, stmt, bindings_values),
@@ -359,5 +361,16 @@ defmodule Feeb.DB.Repo do
 
   defp custom_pragma_for_prod(conn) do
     :ok = SQLite.exec(conn, "PRAGMA synchronous=1")
+  end
+
+  defp normalize_bindings_values(raw_values) when is_list(raw_values) do
+    Enum.map(raw_values, fn
+      # If a struct was passed as variable, we expect it to implement String.Chars
+      %_{} = struct_value ->
+        to_string(struct_value)
+
+      other_value ->
+        other_value
+    end)
   end
 end

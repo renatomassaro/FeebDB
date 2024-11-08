@@ -56,7 +56,7 @@ defmodule Mix.Tasks.FeebDb.MigrateTest do
       assert :ok == MigrateTask.run([])
       assert {:ok, %{type: :directory}} = File.stat(ctx_dir)
 
-      # Resume the original contexts (other synchronous tests may be affected otherwise)
+      # Restore the original contexts (other synchronous tests may be affected otherwise)
       Application.put_env(:feebdb, :contexts, original_contexts)
     end
   end

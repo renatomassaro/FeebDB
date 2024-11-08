@@ -24,7 +24,7 @@ defmodule Feeb.DB.BootTest do
 
       # Test migrations rarely change and thus can be hard-coded here (string because it gets
       # formatted to 123_456_789_012 otherwise, which is hard to read).
-      expected_test_latest = "241020150400" |> String.to_integer()
+      expected_test_latest = "241108191351" |> String.to_integer()
       test_latest = Migrator.get_latest_version(:test)
 
       assert test_latest == expected_test_latest
