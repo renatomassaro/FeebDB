@@ -2,7 +2,8 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
-  alias Sample.{AllTypes, Post}
+  alias Sample.{AllTypes, CustomTypes, Post}
+  alias Sample.Types.TypedID
 
   @context :test
 
@@ -334,6 +335,23 @@ defmodule Feeb.DBTest do
       # NOTE: Currently, this is the only way to work with window functions: by not formatting it
       assert [666] == DB.one({:all_types, :get_max_integer}, [], format: :raw)
       assert [669] == DB.one({:all_types, :get_sum_integer}, [], format: :raw)
+    end
+
+    test "supports structs as inputs (e.g. from custom types)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # We have one `CustomType` entry
+      %{typed_id: 1}
+      |> CustomTypes.creation_params()
+      |> CustomTypes.new()
+      |> DB.insert!()
+
+      # We can find it
+      assert %_{typed_id: typed_id} = DB.one({:custom_types, :get_by_typed_id}, %TypedID{id: 1})
+      assert typed_id == %TypedID{id: 1}
+
+      # But we can't find a CustomType that does not exist:
+      refute DB.one({:custom_types, :get_by_typed_id}, %TypedID{id: 50})
     end
 
     test "raises if multiple results are found", %{shard_id: shard_id} do
