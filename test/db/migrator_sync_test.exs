@@ -46,7 +46,7 @@ defmodule Feeb.Db.MigratorSyncTest do
       # Even though `CREATE TABLE` succeeded, there's no table because `CREATE INDEX` failed
       assert [] == SQLite.raw!(conn, "pragma table_info(users)")
 
-      # Resume the original contexts (other synchronous tests may be affected otherwise)
+      # Restore the original contexts (other synchronous tests may be affected otherwise)
       Application.put_env(:feebdb, :contexts, original_contexts)
     end
   end
