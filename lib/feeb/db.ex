@@ -15,8 +15,8 @@ defmodule Feeb.DB do
   Starts a transaction.
 
   It will fetch (or create) the Repo.Manager for the corresponding {context, shard_id}, and it will
-  also fetch the Repo connection (upon availability; blocking). Once returned, the caller process
-  can perform requests against the shard.
+  also fetch the Repo connection (upon availability; blocking until a connection is made available).
+  Once returned, the caller process can perform requests against the shard.
 
   If `access_type` is `:env`, skip the set up process described above and rely on Context (Process
   state) instead.

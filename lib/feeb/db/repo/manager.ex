@@ -20,10 +20,14 @@ defmodule Feeb.DB.Repo.Manager do
 
   When a "fetch_connection" request comes in, we call fetch_or_create_connection/2. This will do
   precisely what the name says, with the risk that it may return :busy if none of the connections
-  are available and no new connections can be created. We'll ignore the :busy scenario for now.
+  are available and no new connections can be created.
 
   Once a connection was created and/or returned, it will be flagged as :busy from now on, and the
   caller process proceed with sending queries to it.
+
+  If the connection can't be created (because all of them are currently in use by other processes),
+  this GenServer will enqueue the "fetch_connection" request and block the caller until a suitable
+  connection is made available. When that happens, a response is returned with the connection pid.
 
   Finally, eventually the caller process will be finished with the operation and (hopefully) call
   DB.commit/0 or DB.rollback/0, both of which will trigger DB.delete_env/0, resulting in the
@@ -36,6 +40,9 @@ defmodule Feeb.DB.Repo.Manager do
 
   use GenServer
   require Logger
+
+  # Time (in milliseconds) after which we should issue a warning for requests waiting in the queue.
+  @queue_latency_warning_threshold 50
 
   # Public API
 
@@ -65,19 +72,24 @@ defmodule Feeb.DB.Repo.Manager do
       shard_id: shard_id,
       write_1: %{pid: nil, busy?: false},
       read_1: %{pid: nil, busy?: false},
-      read_2: %{pid: nil, busy?: false}
+      read_2: %{pid: nil, busy?: false},
+      write_queue: :queue.new(),
+      read_queue: :queue.new()
     }
 
     {:ok, state}
   end
 
-  def handle_call({:fetch, mode}, _from, state) do
+  def handle_call({:fetch, mode}, caller, state) do
     case fetch_or_create_connection(mode, state) do
       {:ok, repo_pid, new_state} ->
         {:reply, {:ok, repo_pid}, new_state}
 
       {:busy, new_state} ->
-        {:reply, :busy, new_state}
+        # TODO: Add timeout timer
+        new_state = enqueue_request(new_state, mode, caller)
+        Logger.info("All #{mode} connections are busy; enqueueing caller")
+        {:noreply, new_state}
 
       {:error, new_state} ->
         {:reply, :error, new_state}
@@ -86,7 +98,8 @@ defmodule Feeb.DB.Repo.Manager do
 
   def handle_call({:release, repo_pid}, _from, state) do
     case do_release_connection(state, repo_pid) do
-      {:ok, new_state} ->
+      {:ok, released_key, new_state} ->
+        notify_enqueued_requests(new_state, released_key)
         {:reply, :ok, new_state}
 
       {:error, _} ->
@@ -95,14 +108,19 @@ defmodule Feeb.DB.Repo.Manager do
   end
 
   def handle_call({:close, repo_pid}, _from, state) do
-    with {:ok, new_state} <- do_release_connection(state, repo_pid),
+    with {:ok, released_key, new_state} <- do_release_connection(state, repo_pid),
          {:ok, new_state} <- do_close_connection(new_state, repo_pid) do
+      notify_enqueued_requests(new_state, released_key)
       {:reply, :ok, new_state}
     else
       e ->
         Logger.error("Unable to close connection from Repo.Manager: #{inspect(e)}")
         {:reply, :error, state}
     end
+  end
+
+  def handle_info({:released_connection, key}, state) do
+    {:noreply, process_enqueued_callers(state, key)}
   end
 
   defp fetch_or_create_connection(:write, state) do
@@ -142,10 +160,10 @@ defmodule Feeb.DB.Repo.Manager do
   defp do_release_connection(state, pid) do
     case get_key_from_pid(state, pid) do
       {:ok, key} ->
-        {:ok, put_in(state, [key, :busy?], false)}
+        {:ok, key, put_in(state, [key, :busy?], false)}
 
       :error ->
-        Logger.error("Unexpected error; can't find key for #{inspect(pid)}")
+        Logger.error("[release] Unexpected error; can't find key for #{inspect(pid)}")
         {:error, state}
     end
   end
@@ -157,7 +175,7 @@ defmodule Feeb.DB.Repo.Manager do
         {:ok, put_in(state, [key, :pid], nil)}
 
       :error ->
-        Logger.error("Unexpected error; can't find key for #{inspect(pid)}")
+        Logger.error("[close] Unexpected error; can't find key for #{inspect(pid)}")
         {:error, state}
     end
   end
@@ -184,9 +202,53 @@ defmodule Feeb.DB.Repo.Manager do
   end
 
   defp fetch_available_connection(state, key) do
-    pid = get_in(state, [key, :pid])
-    # log(:info, "Fetched #{key} connection - #{inspect(pid)}", state)
-    {:ok, pid, put_in(state, [key, :busy?], true)}
+    case state[key] do
+      %{pid: pid, busy?: false} ->
+        {:ok, pid, put_in(state, [key, :busy?], true)}
+
+      %{busy?: true} ->
+        {:busy, state}
+    end
+  end
+
+  defp enqueue_request(state, mode, caller) when mode in [:read, :write] do
+    time = System.monotonic_time(:millisecond)
+    queue_key = if mode == :write, do: :write_queue, else: :read_queue
+    Map.put(state, queue_key, :queue.in({caller, time}, state[queue_key]))
+  end
+
+  defp notify_enqueued_requests(%{write_queue: {[], []}}, :write_1), do: :noop
+  defp notify_enqueued_requests(%{read_queue: {[], []}}, :read_1), do: :noop
+  defp notify_enqueued_requests(%{read_queue: {[], []}}, :read_2), do: :noop
+  defp notify_enqueued_requests(_, key), do: send(self(), {:released_connection, key})
+
+  defp process_enqueued_callers(state, released_key) do
+    queue_key = if released_key == :write_1, do: :write_queue, else: :read_queue
+
+    with {{:value, {caller, enqueued_at}}, new_queue} <- :queue.out(state[queue_key]),
+         {:ok, conn_pid, new_state} <- fetch_available_connection(state, released_key) do
+      GenServer.reply(caller, {:ok, conn_pid})
+      track_queue_latency(state.shard_id, queue_key, enqueued_at)
+      Map.put(new_state, queue_key, new_queue)
+    else
+      # The queue is empty. No-op (I believe this branch is unreachable)
+      {:empty, _} ->
+        state
+
+      # The connection released just now was fetched by a different caller in the meantime
+      {:busy, _} ->
+        state
+    end
+  end
+
+  defp track_queue_latency(shard_id, queue_key, enqueued_at) do
+    latency = System.monotonic_time(:millisecond) - enqueued_at
+
+    if latency >= @queue_latency_warning_threshold do
+      Logger.warning("#{queue_key} latency for shard #{shard_id} above threshold: #{latency}ms")
+    else
+      Logger.info("#{queue_key} latency for shard #{shard_id}: #{latency}ms")
+    end
   end
 
   defp log(level, msg, state, extra_ctx \\ []) do

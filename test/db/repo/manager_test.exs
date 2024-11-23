@@ -32,10 +32,17 @@ defmodule Feeb.DB.Repo.ManagerTest do
       refute repo_state.transaction_id
     end
 
-    test "busy when connection is used elsewhere", %{manager: manager} do
+    test "blocks when connection is used elsewhere", %{manager: manager} do
       assert {:ok, _repo} = Manager.fetch_connection(manager, :write)
-      assert :busy == Manager.fetch_connection(manager, :write)
-      assert :busy == Manager.fetch_connection(manager, :write)
+
+      test_pid = self()
+
+      spawn(fn ->
+        Manager.fetch_connection(manager, :write)
+        send(test_pid, :got_connection)
+      end)
+
+      refute_receive :got_connection, 50
     end
   end
 
@@ -60,17 +67,23 @@ defmodule Feeb.DB.Repo.ManagerTest do
       refute repo_state.transaction_id
     end
 
-    test "busy when connections are used elsewhere", %{manager: manager} do
+    test "blocks when all connections are used elsewhere", %{manager: manager} do
       assert {:ok, _repo_1} = Manager.fetch_connection(manager, :read)
       assert {:ok, _repo_2} = Manager.fetch_connection(manager, :read)
-      assert :busy == Manager.fetch_connection(manager, :read)
-      assert :busy == Manager.fetch_connection(manager, :read)
+
+      test_pid = self()
+
+      spawn(fn ->
+        Manager.fetch_connection(manager, :read)
+        send(test_pid, :got_connection)
+      end)
+
+      refute_receive :got_connection, 50
     end
 
     test "first connection is preferred over second", %{manager: manager} do
       assert {:ok, repo_1} = Manager.fetch_connection(manager, :read)
       assert {:ok, repo_2} = Manager.fetch_connection(manager, :read)
-      assert :busy == Manager.fetch_connection(manager, :read)
 
       # If both are free, we should favor `repo_1`
       assert :ok == Manager.release_connection(manager, repo_1)
@@ -93,7 +106,6 @@ defmodule Feeb.DB.Repo.ManagerTest do
     test "makes a connection available again", %{manager: manager} do
       assert {:ok, repo_w} = Manager.fetch_connection(manager, :write)
       assert {:ok, repo_r} = Manager.fetch_connection(manager, :read)
-      assert :busy == Manager.fetch_connection(manager, :write)
 
       manager_state = :sys.get_state(manager)
       assert manager_state.write_1.busy?
@@ -117,7 +129,6 @@ defmodule Feeb.DB.Repo.ManagerTest do
 
       assert {:ok, repo_w} = Manager.fetch_connection(manager, :write)
       assert {:ok, repo_r} = Manager.fetch_connection(manager, :read)
-      assert :busy == Manager.fetch_connection(manager, :write)
 
       manager_state = :sys.get_state(manager)
       assert manager_state.write_1.busy?
