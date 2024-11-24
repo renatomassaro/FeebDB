@@ -45,8 +45,13 @@ jobs:
       - name: Check formatting
         run: mix format --check-formatted
 
-      - name: Test app
-        run: mix coveralls.github
+      - name: Quick tests
+        run: mix test
+
+      # It's important that the coverage comes from the full test suite (i.e. with `slow` tests)
+      # because these tests cover lines that were not covered by the quick tests.
+      - name: Full test suite + coverage
+        run: mix coveralls.github --include slow
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   linters:

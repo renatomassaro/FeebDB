@@ -37,6 +37,10 @@ defmodule Test.Feeb.DB.Setup do
   end
 
   defp gen_shard_id do
-    :rand.uniform() |> Kernel.*(1_000_000) |> trunc()
+    # And here I am thinking we wouldn't ever hit different tests with the same shard_id. I was very
+    # wrong. This happened when the test suite had 180 tests. Hence the usage of `strong_rand_bytes`
+    :crypto.strong_rand_bytes(8)
+    |> :binary.decode_unsigned()
+    |> rem(1_000_000)
   end
 end

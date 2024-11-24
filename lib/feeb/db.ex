@@ -15,14 +15,16 @@ defmodule Feeb.DB do
   Starts a transaction.
 
   It will fetch (or create) the Repo.Manager for the corresponding {context, shard_id}, and it will
-  also fetch the Repo connection (upon availability; blocking). Once returned, the caller process
-  can perform requests against the shard.
+  also fetch the Repo connection (upon availability; blocking until a connection is made available).
+  Once returned, the caller process can perform requests against the shard.
 
   If `access_type` is `:env`, skip the set up process described above and rely on Context (Process
   state) instead.
   """
-  def begin(context, shard_id, access_type, transaction_type \\ :exclusive) do
-    setup_env(context, shard_id, access_type)
+  def begin(context, shard_id, access_type, opts \\ []) do
+    transaction_type = opts[:type] || :exclusive
+
+    setup_env(context, shard_id, access_type, opts)
     set_context(context, shard_id)
 
     # We can't BEGIN EXCLUSIVE in a read-only database
@@ -256,11 +258,11 @@ defmodule Feeb.DB do
   # Private
   ##################################################################################################
 
-  defp setup_env(context, shard_id, type) when type in [:write, :read] do
+  defp setup_env(context, shard_id, type, opts) when type in [:write, :read] do
     {:ok, manager_pid} = Repo.Manager.Registry.fetch_or_create(context, shard_id)
 
     # TODO: Handle busy
-    {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type)
+    {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type, opts)
 
     LocalState.add_entry(context, shard_id, {manager_pid, repo_pid, type})
   end

@@ -2,12 +2,12 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
-  alias Sample.{AllTypes, CustomTypes, Post}
+  alias Sample.{AllTypes, CustomTypes, Friend, Post}
   alias Sample.Types.TypedID
 
   @context :test
 
-  describe "begin/3" do
+  describe "begin/4" do
     test "initiates a write transaction", %{shard_id: shard_id, db: db} do
       assert :ok == DB.begin(@context, shard_id, :write)
 
@@ -65,6 +65,52 @@ defmodule Feeb.DBTest do
       DB.commit()
     end
 
+    test "multiple writes on the same shard are enqueued", %{shard_id: shard_id} do
+      task_fn = fn id ->
+        DB.begin(@context, shard_id, :write)
+
+        %{id: id, title: "Post #{id}", body: "Body #{id}"}
+        |> Post.new()
+        |> DB.insert!()
+
+        DB.commit()
+      end
+
+      # We'll try to concurrently insert 3 entries in the same shard
+      [
+        Task.async(fn -> task_fn.(1) end),
+        Task.async(fn -> task_fn.(2) end),
+        Task.async(fn -> task_fn.(3) end)
+      ]
+      |> Task.await_many()
+
+      # All 3 entries were inserted
+      DB.begin(@context, shard_id, :read)
+      assert [_, _, _] = DB.all(Post)
+    end
+
+    test "multiple reads on the same shard are enqueued", %{shard_id: shard_id} do
+      task_fn = fn id ->
+        DB.begin(@context, shard_id, :read)
+        result = DB.one({:friends, :get_by_id}, [id])
+        DB.commit()
+
+        result
+      end
+
+      # We concurrently performed 5 read operations in the same shard. Since there are only two
+      # available read Repos, some queueing was necessary
+      assert [%Friend{id: 1}, %Friend{id: 2}, %Friend{id: 3}, %Friend{id: 4}, %Friend{id: 5}] =
+               [
+                 Task.async(fn -> task_fn.(1) end),
+                 Task.async(fn -> task_fn.(2) end),
+                 Task.async(fn -> task_fn.(3) end),
+                 Task.async(fn -> task_fn.(4) end),
+                 Task.async(fn -> task_fn.(5) end)
+               ]
+               |> Task.await_many()
+    end
+
     test "supports multiple contexts in the same process" do
       {:ok, test_shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
       {:ok, test_shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
@@ -94,18 +140,6 @@ defmodule Feeb.DBTest do
       refute test_entry_2.manager_pid == raw_entry_1.manager_pid
       refute test_entry_1.repo_pid == test_entry_2.repo_pid
       refute test_entry_2.repo_pid == raw_entry_1.repo_pid
-    end
-
-    @tag capture_log: true
-    test "fails on parallel calls", %{shard_id: shard_id} do
-      # Write
-      assert :ok == DB.begin(@context, shard_id, :write)
-      assert_raise MatchError, fn -> DB.begin(@context, shard_id, :write) end
-
-      # Read
-      assert :ok == DB.begin(@context, shard_id, :read)
-      assert :ok == DB.begin(@context, shard_id, :read)
-      assert_raise MatchError, fn -> DB.begin(@context, shard_id, :read) end
     end
   end
 

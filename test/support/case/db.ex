@@ -11,6 +11,8 @@ defmodule Test.Feeb.DBCase do
 
       alias Test.Setup
       alias Test.Samples
+
+      alias Feeb.DB
     end
   end
 

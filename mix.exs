@@ -11,6 +11,7 @@ defmodule Feeb.DB.Mixfile do
       description: description(),
       package: package(),
       deps: deps(),
+      aliases: aliases(),
       compilers: Mix.compilers(),
       test_coverage: [tool: ExCoveralls],
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -19,7 +20,8 @@ defmodule Feeb.DB.Mixfile do
         "coveralls.html": :test,
         "coveralls.detail": :test,
         "coveralls.json": :test,
-        "coveralls.post": :test
+        "coveralls.post": :test,
+        "test.full": :test
       ],
       dialyzer: [plt_add_apps: [:mix]]
     ]
@@ -63,4 +65,12 @@ defmodule Feeb.DB.Mixfile do
   # Specifies which paths to compile per environment
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  defp aliases do
+    [
+      test: "test.quick",
+      "test.quick": "test --exclude slow",
+      "test.full": "test --include slow"
+    ]
+  end
 end
