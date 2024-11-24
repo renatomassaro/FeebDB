@@ -7,7 +7,7 @@ defmodule Feeb.DBTest do
 
   @context :test
 
-  describe "begin/3" do
+  describe "begin/4" do
     test "initiates a write transaction", %{shard_id: shard_id, db: db} do
       assert :ok == DB.begin(@context, shard_id, :write)
 

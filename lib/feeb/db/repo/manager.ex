@@ -41,11 +41,12 @@ defmodule Feeb.DB.Repo.Manager do
   use GenServer
   require Logger
 
-  # Time (in milliseconds) after which we should issue a warning for requests waiting in the queue.
-  @queue_latency_warning_threshold 50
+  # Time (in ms) after which we should issue a warning for requests waiting in the queue. This can
+  # be override with the `:queue_warning_threshold` key in `opts` (accepts `:infinity`).
+  @default_queue_warning_threshold 50
 
   # Default time (in ms) that a request can wait for an available connection. This can be overriden
-  # with the `:queue_timeout` key in `opts`.
+  # with the `:queue_timeout` key in `opts` (accepts `:infinity`).
   @default_queue_timeout 2_000
 
   # Public API
@@ -132,7 +133,7 @@ defmodule Feeb.DB.Repo.Manager do
 
     # Remove caller from the queue
     queue_key = if mode == :write, do: :write_queue, else: :read_queue
-    new_queue = :queue.filter(fn {c, _, _} -> c != caller end, state[queue_key])
+    new_queue = :queue.filter(fn {c, _, _, _} -> c != caller end, state[queue_key])
 
     {:noreply, Map.put(state, queue_key, new_queue)}
   end
@@ -230,7 +231,7 @@ defmodule Feeb.DB.Repo.Manager do
     queue_key = if mode == :write, do: :write_queue, else: :read_queue
     timer_ref = start_timeout_timer(caller, mode, opts)
 
-    Map.put(state, queue_key, :queue.in({caller, time, timer_ref}, state[queue_key]))
+    Map.put(state, queue_key, :queue.in({caller, time, timer_ref, opts}, state[queue_key]))
   end
 
   defp notify_enqueued_requests(%{write_queue: {[], []}}, :write_1), do: :noop
@@ -241,13 +242,13 @@ defmodule Feeb.DB.Repo.Manager do
   defp process_enqueued_callers(state, released_key) do
     queue_key = if released_key == :write_1, do: :write_queue, else: :read_queue
 
-    with {{:value, {caller, enqueued_at, timer_ref}}, new_queue} <- :queue.out(state[queue_key]),
-         caller_pid = elem(caller, 0),
+    with {{:value, {{caller_pid, _} = caller, enqueued_at, timer_ref, opts}}, new_queue} <-
+           :queue.out(state[queue_key]),
          true <- Process.alive?(caller_pid) || {:dead_caller, caller_pid, timer_ref, new_queue},
          {:ok, conn_pid, new_state} <- fetch_available_connection(state, released_key) do
       GenServer.reply(caller, {:ok, conn_pid})
 
-      track_queue_latency(state.shard_id, queue_key, enqueued_at)
+      track_queue_latency(state.shard_id, queue_key, enqueued_at, opts)
       stop_timeout_timer(timer_ref)
 
       Map.put(new_state, queue_key, new_queue)
@@ -270,11 +271,14 @@ defmodule Feeb.DB.Repo.Manager do
     end
   end
 
-  defp track_queue_latency(shard_id, queue_key, enqueued_at) do
+  defp track_queue_latency(shard_id, queue_key, enqueued_at, opts) do
     latency = System.monotonic_time(:millisecond) - enqueued_at
+    latency_threshold = opts[:queue_warning_threshold] || @default_queue_warning_threshold
 
-    if latency >= @queue_latency_warning_threshold do
-      Logger.warning("#{queue_key} latency for shard #{shard_id} above threshold: #{latency}ms")
+    if latency >= latency_threshold do
+      ("#{queue_key} latency for shard #{shard_id} above threshold " <>
+         "(#{latency_threshold}ms): #{latency}ms")
+      |> Logger.warning()
     else
       Logger.info("#{queue_key} latency for shard #{shard_id}: #{latency}ms")
     end

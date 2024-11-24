@@ -171,7 +171,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
       # for a connection
       manager_state = :sys.get_state(manager)
       assert :queue.len(manager_state.write_queue) == 1
-      assert :queue.any(fn {{pid, _}, _, _} -> pid == spawn_pid end, manager_state.write_queue)
+      assert :queue.any(fn {{pid, _}, _, _, _} -> pid == spawn_pid end, manager_state.write_queue)
     end
 
     test "handles when the *only* caller waiting for a connection dies", %{manager: manager} do
@@ -187,7 +187,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
       %{write_queue: queue_before, write_1: write_1_before} = :sys.get_state(manager)
       assert write_1_before.busy?
       assert :queue.len(queue_before) == 1
-      assert :queue.any(fn {{pid, _}, _, _} -> pid == spawn_pid end, queue_before)
+      assert :queue.any(fn {{pid, _}, _, _, _} -> pid == spawn_pid end, queue_before)
 
       # The caller has died but is still waiting for a connection, since we are not monitoring it
       # inside Repo.Manager
@@ -221,8 +221,8 @@ defmodule Feeb.DB.Repo.ManagerTest do
       # Initially, both `spawn_pid_1` and `spawn_pid_2` are in the queue (in that order)
       %{write_queue: queue_before} = :sys.get_state(manager)
       assert :queue.len(queue_before) == 2
-      assert {{:value, {{^spawn_pid_1, _}, _, _}}, next_queue} = :queue.out(queue_before)
-      assert {{:value, {{^spawn_pid_2, _}, _, _}}, _} = :queue.out(next_queue)
+      assert {{:value, {{^spawn_pid_1, _}, _, _, _}}, next_queue} = :queue.out(queue_before)
+      assert {{:value, {{^spawn_pid_2, _}, _, _, _}}, _} = :queue.out(next_queue)
 
       # We'll kill spawn_pid_1, which as seen above is the first element in the queue
       Process.exit(spawn_pid_1, :kill)
