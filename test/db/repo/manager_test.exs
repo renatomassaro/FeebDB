@@ -216,6 +216,9 @@ defmodule Feeb.DB.Repo.ManagerTest do
         spawn_and_wait(fn ->
           Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
           send(test_pid, :got_connection)
+
+          # Keep this process alive until the end of the test
+          :timer.sleep(999_999)
         end)
 
       # Initially, both `spawn_pid_1` and `spawn_pid_2` are in the queue (in that order)
@@ -238,6 +241,70 @@ defmodule Feeb.DB.Repo.ManagerTest do
       # See? `spawn_pid_2` was awarded the connection despite `spawn_pid_1` dying in front of it.
       # Erlang can be brutal sometimes
       assert_receive :got_connection, 50
+    end
+  end
+
+  describe "monitoring logic" do
+    test "when process holding connection dies, connection is released", %{manager: manager} do
+      request_pid =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write)
+
+          # Keep this process alive until the test can end its execution
+          :timer.sleep(999_999)
+        end)
+
+      # The Repo.Manager currently has an active write_1 connection leased to `request_pid`
+      state_before = :sys.get_state(manager)
+      assert state_before.write_1.busy?
+      assert state_before.write_1.caller_pid == request_pid
+
+      # Now we kill `request_pid`
+      Process.exit(request_pid, :kill)
+
+      # Give ample time for the `handle_info({:DOWN, ...})` callback to run
+      :timer.sleep(10)
+
+      # With the death of `request_pid`, the write_1 connection is now available to be picked up
+      state_after = :sys.get_state(manager)
+      refute state_after.write_1.busy?
+      assert state_after.write_1.caller_pid == nil
+      assert state_after.write_1.monitor_ref == nil
+    end
+
+    test "on caller's death, requests on the queue get served", %{manager: manager} do
+      request_pid =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write)
+          :timer.sleep(999_999)
+        end)
+
+      queued_request_pid =
+        spawn_and_wait(fn ->
+          # This guy is waiting for `request_pid` to release the connection
+          Manager.fetch_connection(manager, :write)
+          :timer.sleep(999_999)
+        end)
+
+      # The write_1 connection is busy (leased to `request_pid`) and there is a non-empty queue
+      state_before = :sys.get_state(manager)
+      assert state_before.write_1.busy?
+      assert state_before.write_1.caller_pid == request_pid
+      assert :queue.len(state_before.write_queue) == 1
+
+      # Now we kill `request_pid`
+      Process.exit(request_pid, :kill)
+
+      # Give ample time for the `handle_info({:DOWN, ...})` callback to run
+      :timer.sleep(10)
+
+      # Now, the write_1 connection is still busy, but leased to `queued_request_pid` instead.
+      # The write_queue is now empty
+      state_after = :sys.get_state(manager)
+      assert state_after.write_1.busy?
+      assert state_after.write_1.caller_pid == queued_request_pid
+      assert state_after.write_1.monitor_ref != state_before.write_1.monitor_ref
+      assert :queue.len(state_after.write_queue) == 0
     end
   end
 end
