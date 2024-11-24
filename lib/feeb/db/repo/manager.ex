@@ -56,7 +56,8 @@ defmodule Feeb.DB.Repo.Manager do
   end
 
   def fetch_connection(manager_pid, type, opts \\ []) when type in [:write, :read] do
-    GenServer.call(manager_pid, {:fetch, type, opts})
+    # Custom timeout information must be set via `:queue_timeout`; default is 2s.
+    GenServer.call(manager_pid, {:fetch, type, opts}, :infinity)
   end
 
   def release_connection(manager_pid, repo_pid) do
