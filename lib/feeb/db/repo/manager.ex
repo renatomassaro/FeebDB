@@ -228,9 +228,7 @@ defmodule Feeb.DB.Repo.Manager do
   defp enqueue_request(state, mode, caller, opts) when mode in [:read, :write] do
     time = System.monotonic_time(:millisecond)
     queue_key = if mode == :write, do: :write_queue, else: :read_queue
-
-    queue_timeout = opts[:queue_timeout] || @default_queue_timeout
-    timer_ref = Process.send_after(self(), {:queue_timeout, caller, mode}, queue_timeout)
+    timer_ref = start_timeout_timer(caller, mode, opts)
 
     Map.put(state, queue_key, :queue.in({caller, time, timer_ref}, state[queue_key]))
   end
@@ -248,7 +246,7 @@ defmodule Feeb.DB.Repo.Manager do
       GenServer.reply(caller, {:ok, conn_pid})
 
       track_queue_latency(state.shard_id, queue_key, enqueued_at)
-      Process.cancel_timer(timer_ref)
+      stop_timeout_timer(timer_ref)
 
       Map.put(new_state, queue_key, new_queue)
     else
@@ -271,6 +269,19 @@ defmodule Feeb.DB.Repo.Manager do
       Logger.info("#{queue_key} latency for shard #{shard_id}: #{latency}ms")
     end
   end
+
+  defp start_timeout_timer(caller, mode, opts) do
+    queue_timeout = opts[:queue_timeout] || @default_queue_timeout
+
+    if is_integer(queue_timeout) do
+      Process.send_after(self(), {:queue_timeout, caller, mode}, queue_timeout)
+    else
+      :no_timer
+    end
+  end
+
+  defp stop_timeout_timer(ref) when is_reference(ref), do: Process.cancel_timer(ref)
+  defp stop_timeout_timer(:no_timer), do: :noop
 
   defp log(level, msg, state, extra_ctx \\ []) do
     log_fn =

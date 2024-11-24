@@ -57,7 +57,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
       spawn_pid =
         spawn(fn ->
           send(test_pid, :spawn_initiated)
-          Manager.fetch_connection(manager, :write, queue_timeout: 999_999)
+          Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
         end)
 
       # Block just to give enough time for the `spawn` block to try fetching the connection
