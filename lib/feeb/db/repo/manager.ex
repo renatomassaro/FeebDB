@@ -242,6 +242,8 @@ defmodule Feeb.DB.Repo.Manager do
     queue_key = if released_key == :write_1, do: :write_queue, else: :read_queue
 
     with {{:value, {caller, enqueued_at, timer_ref}}, new_queue} <- :queue.out(state[queue_key]),
+         caller_pid = elem(caller, 0),
+         true <- Process.alive?(caller_pid) || {:dead_caller, caller_pid, timer_ref, new_queue},
          {:ok, conn_pid, new_state} <- fetch_available_connection(state, released_key) do
       GenServer.reply(caller, {:ok, conn_pid})
 
@@ -250,7 +252,15 @@ defmodule Feeb.DB.Repo.Manager do
 
       Map.put(new_state, queue_key, new_queue)
     else
-      # The queue is empty. No-op (I believe this branch is unreachable)
+      # The caller died while waiting for a connection. Remove it from the queue and try again. The
+      # connection is still available, so we might as well lease it to the next entry in the queue
+      {:dead_caller, caller_pid, timer_ref, new_queue} ->
+        Logger.info("Caller #{inspect(caller_pid)} waiting for a connection has died; skipping it")
+        stop_timeout_timer(timer_ref)
+        new_state = Map.put(state, queue_key, new_queue)
+        process_enqueued_callers(new_state, released_key)
+
+      # The queue is empty. Nothing else needs to be done
       {:empty, _} ->
         state
 

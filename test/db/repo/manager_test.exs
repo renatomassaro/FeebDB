@@ -11,7 +11,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
     {:ok, %{manager: manager_pid}}
   end
 
-  describe "fetch_connection/2 - write" do
+  describe "fetch_connection/3 - write" do
     test "creates the first connection", %{manager: manager} do
       # Nothing initially
       refute :sys.get_state(manager).write_1.pid
@@ -44,38 +44,9 @@ defmodule Feeb.DB.Repo.ManagerTest do
 
       refute_receive :got_connection, 50
     end
-
-    test "returns :timeout when queue timeout threshold is passed", %{manager: manager} do
-      # The only write connection is blocked
-      assert {:ok, _repo} = Manager.fetch_connection(manager, :write)
-
-      # The call blocked for `queue_timeout` milliseconds until it returned `:timeout`
-      assert :timeout == Manager.fetch_connection(manager, :write, queue_timeout: 50)
-
-      test_pid = self()
-
-      spawn_pid =
-        spawn(fn ->
-          send(test_pid, :spawn_initiated)
-          Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
-        end)
-
-      # Block just to give enough time for the `spawn` block to try fetching the connection
-      receive do
-        :spawn_initiated ->
-          :timer.sleep(10)
-          :ok
-      end
-
-      # The `test_pid` caller no longer exists in the queue. However, `spawn_pid` is still waiting
-      # for a connection
-      manager_state = :sys.get_state(manager)
-      assert :queue.len(manager_state.write_queue) == 1
-      assert :queue.any(fn {{pid, _}, _, _} -> pid == spawn_pid end, manager_state.write_queue)
-    end
   end
 
-  describe "fetch_connection/2 - read" do
+  describe "fetch_connection/3 - read" do
     test "creates the first connection", %{manager: manager} do
       # Nothing initially
       refute :sys.get_state(manager).read_1.pid
@@ -180,6 +151,93 @@ defmodule Feeb.DB.Repo.ManagerTest do
       # Because the old ones are dead
       refute Process.alive?(repo_w)
       refute Process.alive?(repo_r)
+    end
+  end
+
+  describe "enqueueing logic" do
+    test "fetch_connection/3 returns :timeout when over waiting threshold", %{manager: manager} do
+      # The only write connection is blocked
+      assert {:ok, _repo} = Manager.fetch_connection(manager, :write)
+
+      # The call blocked for `queue_timeout` milliseconds until it returned `:timeout`
+      assert :timeout == Manager.fetch_connection(manager, :write, queue_timeout: 50)
+
+      spawn_pid =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
+        end)
+
+      # The `test_pid` caller no longer exists in the queue. However, `spawn_pid` is still waiting
+      # for a connection
+      manager_state = :sys.get_state(manager)
+      assert :queue.len(manager_state.write_queue) == 1
+      assert :queue.any(fn {{pid, _}, _, _} -> pid == spawn_pid end, manager_state.write_queue)
+    end
+
+    test "handles when the *only* caller waiting for a connection dies", %{manager: manager} do
+      # The only write connection is taken
+      assert {:ok, repo} = Manager.fetch_connection(manager, :write)
+
+      spawn_pid =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
+        end)
+
+      # Initially, the `write_1` connection is busy and `spawn_pid` is waiting for it
+      %{write_queue: queue_before, write_1: write_1_before} = :sys.get_state(manager)
+      assert write_1_before.busy?
+      assert :queue.len(queue_before) == 1
+      assert :queue.any(fn {{pid, _}, _, _} -> pid == spawn_pid end, queue_before)
+
+      # The caller has died but is still waiting for a connection, since we are not monitoring it
+      # inside Repo.Manager
+      Process.exit(spawn_pid, :kill)
+
+      # The write connection will now be made available to the dead caller
+      assert :ok == Manager.release_connection(manager, repo)
+
+      # Afterwards, the connection is no longer busy and there is no one in the queue
+      %{write_queue: queue_after, write_1: write_1_after} = :sys.get_state(manager)
+      refute write_1_after.busy?
+      assert :queue.len(queue_after) == 0
+    end
+
+    test "handles when *one* of the callers waiting for a connection dies", %{manager: manager} do
+      # The only write connection is taken
+      assert {:ok, repo} = Manager.fetch_connection(manager, :write)
+      test_pid = self()
+
+      spawn_pid_1 =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
+        end)
+
+      spawn_pid_2 =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
+          send(test_pid, :got_connection)
+        end)
+
+      # Initially, both `spawn_pid_1` and `spawn_pid_2` are in the queue (in that order)
+      %{write_queue: queue_before} = :sys.get_state(manager)
+      assert :queue.len(queue_before) == 2
+      assert {{:value, {{^spawn_pid_1, _}, _, _}}, next_queue} = :queue.out(queue_before)
+      assert {{:value, {{^spawn_pid_2, _}, _, _}}, _} = :queue.out(next_queue)
+
+      # We'll kill spawn_pid_1, which as seen above is the first element in the queue
+      Process.exit(spawn_pid_1, :kill)
+
+      # The write connection will now be made available to the queue
+      assert :ok == Manager.release_connection(manager, repo)
+
+      # Now the queue is empty but the `write_1` connection is busy
+      %{write_queue: queue_after, write_1: write_1_after} = :sys.get_state(manager)
+      assert :queue.len(queue_after) == 0
+      assert write_1_after.busy?
+
+      # See? `spawn_pid_2` was awarded the connection despite `spawn_pid_1` dying in front of it.
+      # Erlang can be brutal sometimes
+      assert_receive :got_connection, 50
     end
   end
 end
