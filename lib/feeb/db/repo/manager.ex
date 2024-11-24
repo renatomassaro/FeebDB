@@ -44,14 +44,18 @@ defmodule Feeb.DB.Repo.Manager do
   # Time (in milliseconds) after which we should issue a warning for requests waiting in the queue.
   @queue_latency_warning_threshold 50
 
+  # Default time (in ms) that a request can wait for an available connection. This can be overriden
+  # with the `:queue_timeout` key in `opts`.
+  @default_queue_timeout 2_000
+
   # Public API
 
   def start_link({context, shard_id}) do
     GenServer.start_link(__MODULE__, {context, shard_id})
   end
 
-  def fetch_connection(manager_pid, type) when type in [:write, :read] do
-    GenServer.call(manager_pid, {:fetch, type})
+  def fetch_connection(manager_pid, type, opts \\ []) when type in [:write, :read] do
+    GenServer.call(manager_pid, {:fetch, type, opts})
   end
 
   def release_connection(manager_pid, repo_pid) do
@@ -80,14 +84,13 @@ defmodule Feeb.DB.Repo.Manager do
     {:ok, state}
   end
 
-  def handle_call({:fetch, mode}, caller, state) do
+  def handle_call({:fetch, mode, opts}, caller, state) do
     case fetch_or_create_connection(mode, state) do
       {:ok, repo_pid, new_state} ->
         {:reply, {:ok, repo_pid}, new_state}
 
       {:busy, new_state} ->
-        # TODO: Add timeout timer
-        new_state = enqueue_request(new_state, mode, caller)
+        new_state = enqueue_request(new_state, mode, caller, opts)
         Logger.info("All #{mode} connections are busy; enqueueing caller")
         {:noreply, new_state}
 
@@ -121,6 +124,17 @@ defmodule Feeb.DB.Repo.Manager do
 
   def handle_info({:released_connection, key}, state) do
     {:noreply, process_enqueued_callers(state, key)}
+  end
+
+  def handle_info({:queue_timeout, caller, mode}, state) do
+    # Tell the caller no connection was available within the specified timeout interval
+    GenServer.reply(caller, :timeout)
+
+    # Remove caller from the queue
+    queue_key = if mode == :write, do: :write_queue, else: :read_queue
+    new_queue = :queue.filter(fn {c, _, _} -> c != caller end, state[queue_key])
+
+    {:noreply, Map.put(state, queue_key, new_queue)}
   end
 
   defp fetch_or_create_connection(:write, state) do
@@ -211,10 +225,14 @@ defmodule Feeb.DB.Repo.Manager do
     end
   end
 
-  defp enqueue_request(state, mode, caller) when mode in [:read, :write] do
+  defp enqueue_request(state, mode, caller, opts) when mode in [:read, :write] do
     time = System.monotonic_time(:millisecond)
     queue_key = if mode == :write, do: :write_queue, else: :read_queue
-    Map.put(state, queue_key, :queue.in({caller, time}, state[queue_key]))
+
+    queue_timeout = opts[:queue_timeout] || @default_queue_timeout
+    timer_ref = Process.send_after(self(), {:queue_timeout, caller, mode}, queue_timeout)
+
+    Map.put(state, queue_key, :queue.in({caller, time, timer_ref}, state[queue_key]))
   end
 
   defp notify_enqueued_requests(%{write_queue: {[], []}}, :write_1), do: :noop
@@ -225,10 +243,13 @@ defmodule Feeb.DB.Repo.Manager do
   defp process_enqueued_callers(state, released_key) do
     queue_key = if released_key == :write_1, do: :write_queue, else: :read_queue
 
-    with {{:value, {caller, enqueued_at}}, new_queue} <- :queue.out(state[queue_key]),
+    with {{:value, {caller, enqueued_at, timer_ref}}, new_queue} <- :queue.out(state[queue_key]),
          {:ok, conn_pid, new_state} <- fetch_available_connection(state, released_key) do
       GenServer.reply(caller, {:ok, conn_pid})
+
       track_queue_latency(state.shard_id, queue_key, enqueued_at)
+      Process.cancel_timer(timer_ref)
+
       Map.put(new_state, queue_key, new_queue)
     else
       # The queue is empty. No-op (I believe this branch is unreachable)

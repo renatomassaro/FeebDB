@@ -44,6 +44,35 @@ defmodule Feeb.DB.Repo.ManagerTest do
 
       refute_receive :got_connection, 50
     end
+
+    test "returns :timeout when queue timeout threshold is passed", %{manager: manager} do
+      # The only write connection is blocked
+      assert {:ok, _repo} = Manager.fetch_connection(manager, :write)
+
+      # The call blocked for `queue_timeout` milliseconds until it returned `:timeout`
+      assert :timeout == Manager.fetch_connection(manager, :write, queue_timeout: 50)
+
+      test_pid = self()
+
+      spawn_pid =
+        spawn(fn ->
+          send(test_pid, :spawn_initiated)
+          Manager.fetch_connection(manager, :write, queue_timeout: 999_999)
+        end)
+
+      # Block just to give enough time for the `spawn` block to try fetching the connection
+      receive do
+        :spawn_initiated ->
+          :timer.sleep(10)
+          :ok
+      end
+
+      # The `test_pid` caller no longer exists in the queue. However, `spawn_pid` is still waiting
+      # for a connection
+      manager_state = :sys.get_state(manager)
+      assert :queue.len(manager_state.write_queue) == 1
+      assert :queue.any(fn {{pid, _}, _, _} -> pid == spawn_pid end, manager_state.write_queue)
+    end
   end
 
   describe "fetch_connection/2 - read" do
