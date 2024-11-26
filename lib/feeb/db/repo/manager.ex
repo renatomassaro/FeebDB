@@ -184,7 +184,6 @@ defmodule Feeb.DB.Repo.Manager do
         fetch_available_connection(state, :write_1, caller)
 
       state.write_1.busy? ->
-        # TODO: Instead of polling, notify caller once available
         {:busy, state}
     end
   end
@@ -208,7 +207,6 @@ defmodule Feeb.DB.Repo.Manager do
         fetch_available_connection(state, :read_2, caller)
 
       state.read_2.busy? ->
-        # TODO: Instead of polling, notify caller once available
         {:busy, state}
     end
   end
