@@ -158,7 +158,6 @@ defmodule Feeb.DB.Repo.Manager do
 
         # If `caller_pid` had a normal death, emit a warning so they remember to properly release
         # the connection. This is likely an application bug
-
         if reason == :normal do
           ("Process #{inspect(caller_pid)} died with :normal reason without releasing the " <>
              "#{key} connection #{inspect(repo_pid)} -- maybe you forgot to commit/rollback?")

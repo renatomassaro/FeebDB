@@ -216,9 +216,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
         spawn_and_wait(fn ->
           Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
           send(test_pid, :got_connection)
-
-          # Keep this process alive until the end of the test
-          :timer.sleep(999_999)
+          block_forever()
         end)
 
       # Initially, both `spawn_pid_1` and `spawn_pid_2` are in the queue (in that order)
@@ -249,9 +247,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
       request_pid =
         spawn_and_wait(fn ->
           Manager.fetch_connection(manager, :write)
-
-          # Keep this process alive until the test can end its execution
-          :timer.sleep(999_999)
+          block_forever()
         end)
 
       # The Repo.Manager currently has an active write_1 connection leased to `request_pid`
@@ -276,14 +272,14 @@ defmodule Feeb.DB.Repo.ManagerTest do
       request_pid =
         spawn_and_wait(fn ->
           Manager.fetch_connection(manager, :write)
-          :timer.sleep(999_999)
+          block_forever()
         end)
 
       queued_request_pid =
         spawn_and_wait(fn ->
           # This guy is waiting for `request_pid` to release the connection
           Manager.fetch_connection(manager, :write)
-          :timer.sleep(999_999)
+          block_forever()
         end)
 
       # The write_1 connection is busy (leased to `request_pid`) and there is a non-empty queue

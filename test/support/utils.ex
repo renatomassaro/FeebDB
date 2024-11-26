@@ -23,4 +23,14 @@ defmodule Test.Utils do
 
     spawn_pid
   end
+
+  @doc """
+  Starts a receive block that will hang indefinitely. This is used for spawned processes that should
+  remain alive until the end of the test suite to avoid flakes.
+  """
+  def block_forever do
+    receive do
+      :will_never_receive -> :ok
+    end
+  end
 end
