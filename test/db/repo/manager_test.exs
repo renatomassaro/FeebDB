@@ -121,6 +121,27 @@ defmodule Feeb.DB.Repo.ManagerTest do
       assert {:ok, repo_w} == Manager.fetch_connection(manager, :write)
       assert {:ok, repo_r} == Manager.fetch_connection(manager, :read)
     end
+
+    test "cancels the repo_timeout timer after release", %{manager: manager} do
+      assert {:ok, repo} = Manager.fetch_connection(manager, :write)
+
+      # timer_ref is set when the connection is held by this process
+      state_before = :sys.get_state(manager)
+      assert state_before.write_1.busy?
+      assert state_before.write_1.timer_ref
+      assert state_before.write_1.monitor_ref
+
+      assert :ok == Manager.release_connection(manager, repo)
+
+      # Once released, timer_ref was emptied
+      state_after = :sys.get_state(manager)
+      refute state_after.write_1.busy?
+      refute state_after.write_1.timer_ref
+      refute state_after.write_1.monitor_ref
+
+      # The `false` return here means the timer could not be found -- because it was canceled
+      assert false == Process.cancel_timer(state_before.write_1.timer_ref)
+    end
   end
 
   describe "close_connection/2" do
@@ -242,7 +263,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
     end
   end
 
-  describe "monitoring logic" do
+  describe "monitoring logic - leasee's death" do
     test "when process holding connection dies, connection is released", %{manager: manager} do
       request_pid =
         spawn_and_wait(fn ->
@@ -301,6 +322,37 @@ defmodule Feeb.DB.Repo.ManagerTest do
       assert state_after.write_1.caller_pid == queued_request_pid
       assert state_after.write_1.monitor_ref != state_before.write_1.monitor_ref
       assert :queue.len(state_after.write_queue) == 0
+    end
+  end
+
+  describe "monitoring logic - leasee's living forever" do
+    test "raises a timeout exception when leasee exceeded the timeout", %{manager: manager} do
+      # We'll start a connection and specify it should be released within 25ms
+      assert {:ok, _repo} = Manager.fetch_connection(manager, :write, timeout: 25)
+
+      # TODO: Assert that the Repo internal state was "released" too
+
+      # We didn't release it, so within 25ms (plus overhead) we received an :EXIT signal
+      Process.flag(:trap_exit, true)
+      assert_receive {:EXIT, manager, :feebdb_repo_timeout}, 50
+
+      # The manager state was updated to make sure the `:write_1` connection is free again
+      manager_state = :sys.get_state(manager)
+      refute manager_state.write_1.busy?
+      refute manager_state.write_1.caller_pid
+      refute manager_state.write_1.timer_ref
+      refute manager_state.write_1.monitor_ref
+
+      # And we can actually grab it again
+      assert {:ok, _} = Manager.fetch_connection(manager, :write)
+    end
+
+    test "allows for infinite timeout", %{manager: manager} do
+      assert {:ok, _repo} = Manager.fetch_connection(manager, :write, timeout: :infinity)
+
+      # When `timeout: :infinity` we don't create a Repo timeout timer
+      manager_state = :sys.get_state(manager)
+      assert manager_state.write_1.timer_ref == :no_timer
     end
   end
 end

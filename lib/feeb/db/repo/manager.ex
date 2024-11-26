@@ -49,6 +49,10 @@ defmodule Feeb.DB.Repo.Manager do
   # with the `:queue_timeout` key in `opts` (accepts `:infinity`).
   @default_queue_timeout 2_000
 
+  # Default time (in ms) that a request can hold the connection. Once that threadshold is hit, the
+  # request will be killed and a timeout exception will be raised.
+  @default_repo_timeout 1_000
+
   # Public API
 
   def start_link({context, shard_id}) do
@@ -73,12 +77,13 @@ defmodule Feeb.DB.Repo.Manager do
   def init({context, shard_id}) do
     Logger.info("Starting repo manager for shard #{shard_id} #{inspect(self())}")
 
+    # TODO: Maybe convert each connection entry to be a struct
     state = %{
       context: context,
       shard_id: shard_id,
-      write_1: %{pid: nil, busy?: false, caller_pid: nil, monitor_ref: nil},
-      read_1: %{pid: nil, busy?: false, caller_pid: nil, monitor_ref: nil},
-      read_2: %{pid: nil, busy?: false, caller_pid: nil, monitor_ref: nil},
+      write_1: %{pid: nil, busy?: false, caller_pid: nil, monitor_ref: nil, timer_ref: nil},
+      read_1: %{pid: nil, busy?: false, caller_pid: nil, monitor_ref: nil, timer_ref: nil},
+      read_2: %{pid: nil, busy?: false, caller_pid: nil, monitor_ref: nil, timer_ref: nil},
       write_queue: :queue.new(),
       read_queue: :queue.new()
     }
@@ -87,7 +92,7 @@ defmodule Feeb.DB.Repo.Manager do
   end
 
   def handle_call({:fetch, mode, opts}, caller, state) do
-    case fetch_or_create_connection(mode, state, caller) do
+    case fetch_or_create_connection(mode, state, caller, opts) do
       {:ok, repo_pid, new_state} ->
         {:reply, {:ok, repo_pid}, new_state}
 
@@ -126,6 +131,27 @@ defmodule Feeb.DB.Repo.Manager do
 
   def handle_info({:released_connection, key}, state) do
     {:noreply, process_enqueued_callers(state, key)}
+  end
+
+  def handle_info({:repo_timeout, key, caller_pid}, state) do
+    case state[key] do
+      %{pid: repo_pid, busy?: true, caller_pid: ^caller_pid} ->
+        # Kill the caller
+        Process.exit(caller_pid, :feebdb_repo_timeout)
+
+        # TODO: We need to notify the Repo so it resets any counters, transaction references etc
+
+        # Release the connection. It is supposed to always succeed
+        {:ok, ^key, new_state} = do_release_connection(state, repo_pid)
+        notify_enqueued_requests(new_state, key)
+
+        {:noreply, new_state}
+
+      %{caller_pid: _other_caller_or_nil} ->
+        # Despite the timeout, the connection is no longer used (or used by a different caller)
+        # Theoretically, this is a possible race condition. In this case, we just don't do anything
+        {:noreply, state}
+    end
   end
 
   def handle_info({:queue_timeout, caller, mode}, state) do
@@ -173,38 +199,38 @@ defmodule Feeb.DB.Repo.Manager do
     end
   end
 
-  defp fetch_or_create_connection(:write, state, caller) do
+  defp fetch_or_create_connection(:write, state, caller, opts) do
     cond do
       is_nil(state.write_1.pid) ->
         with {:ok, _, state} <- establish_connection(state, :write_1) do
-          fetch_available_connection(state, :write_1, caller)
+          fetch_available_connection(state, :write_1, caller, opts)
         end
 
       not state.write_1.busy? ->
-        fetch_available_connection(state, :write_1, caller)
+        fetch_available_connection(state, :write_1, caller, opts)
 
       state.write_1.busy? ->
         {:busy, state}
     end
   end
 
-  defp fetch_or_create_connection(:read, state, caller) do
+  defp fetch_or_create_connection(:read, state, caller, opts) do
     cond do
       is_nil(state.read_1.pid) ->
         with {:ok, _, state} <- establish_connection(state, :read_1) do
-          fetch_available_connection(state, :read_1, caller)
+          fetch_available_connection(state, :read_1, caller, opts)
         end
 
       not state.read_1.busy? ->
-        fetch_available_connection(state, :read_1, caller)
+        fetch_available_connection(state, :read_1, caller, opts)
 
       is_nil(state.read_2.pid) ->
         with {:ok, _, state} <- establish_connection(state, :read_2) do
-          fetch_available_connection(state, :read_2, caller)
+          fetch_available_connection(state, :read_2, caller, opts)
         end
 
       not state.read_2.busy? ->
-        fetch_available_connection(state, :read_2, caller)
+        fetch_available_connection(state, :read_2, caller, opts)
 
       state.read_2.busy? ->
         {:busy, state}
@@ -217,11 +243,15 @@ defmodule Feeb.DB.Repo.Manager do
         # Stop monitoring the caller process since it released the connection
         Process.demonitor(get_in(state, [key, :monitor_ref]))
 
+        # Stop the repo_timeout timer
+        stop_timer(get_in(state, [key, :timer_ref]))
+
         new_state =
           state
           |> put_in([key, :busy?], false)
           |> put_in([key, :caller_pid], nil)
           |> put_in([key, :monitor_ref], nil)
+          |> put_in([key, :timer_ref], nil)
 
         {:ok, key, new_state}
 
@@ -256,7 +286,16 @@ defmodule Feeb.DB.Repo.Manager do
     case Feeb.DB.Repo.start_link({context, shard_id, db_path, mode}) do
       {:ok, repo_pid} ->
         log(:info, "Established and fetched #{mode} connection", state)
-        {:ok, repo_pid, Map.put(state, key, %{pid: repo_pid, busy?: false})}
+
+        connection_entry = %{
+          pid: repo_pid,
+          busy?: false,
+          monitor_ref: nil,
+          caller_pid: nil,
+          timer_ref: nil
+        }
+
+        {:ok, repo_pid, Map.put(state, key, connection_entry)}
 
       error ->
         log(:error, "Error creating #{mode} connection: #{inspect(error)}", state)
@@ -264,16 +303,19 @@ defmodule Feeb.DB.Repo.Manager do
     end
   end
 
-  defp fetch_available_connection(state, key, {caller_pid, _}) do
+  defp fetch_available_connection(state, key, {caller_pid, _}, opts) do
     case state[key] do
       %{pid: pid, busy?: false} ->
         monitor_ref = Process.monitor(caller_pid)
+
+        timer_ref = start_repo_timeout_timer(key, caller_pid, opts)
 
         new_state =
           state
           |> put_in([key, :busy?], true)
           |> put_in([key, :caller_pid], caller_pid)
           |> put_in([key, :monitor_ref], monitor_ref)
+          |> put_in([key, :timer_ref], timer_ref)
 
         {:ok, pid, new_state}
 
@@ -285,7 +327,7 @@ defmodule Feeb.DB.Repo.Manager do
   defp enqueue_request(state, mode, caller, opts) when mode in [:read, :write] do
     time = System.monotonic_time(:millisecond)
     queue_key = if mode == :write, do: :write_queue, else: :read_queue
-    timer_ref = start_timeout_timer(caller, mode, opts)
+    timer_ref = start_queue_timeout_timer(caller, mode, opts)
 
     Map.put(state, queue_key, :queue.in({caller, time, timer_ref, opts}, state[queue_key]))
   end
@@ -301,11 +343,11 @@ defmodule Feeb.DB.Repo.Manager do
     with {{:value, {{caller_pid, _} = caller, enqueued_at, timer_ref, opts}}, new_queue} <-
            :queue.out(state[queue_key]),
          true <- Process.alive?(caller_pid) || {:dead_caller, caller_pid, timer_ref, new_queue},
-         {:ok, conn_pid, new_state} <- fetch_available_connection(state, released_key, caller) do
+         {:ok, conn_pid, new_state} <- fetch_available_connection(state, released_key, caller, opts) do
       GenServer.reply(caller, {:ok, conn_pid})
 
       track_queue_latency(state.shard_id, queue_key, enqueued_at, opts)
-      stop_timeout_timer(timer_ref)
+      stop_timer(timer_ref)
 
       Map.put(new_state, queue_key, new_queue)
     else
@@ -313,7 +355,7 @@ defmodule Feeb.DB.Repo.Manager do
       # connection is still available, so we might as well lease it to the next entry in the queue
       {:dead_caller, caller_pid, timer_ref, new_queue} ->
         Logger.info("Caller #{inspect(caller_pid)} waiting for a connection has died; skipping it")
-        stop_timeout_timer(timer_ref)
+        stop_timer(timer_ref)
         new_state = Map.put(state, queue_key, new_queue)
         process_enqueued_callers(new_state, released_key)
 
@@ -340,7 +382,17 @@ defmodule Feeb.DB.Repo.Manager do
     end
   end
 
-  defp start_timeout_timer(caller, mode, opts) do
+  defp start_repo_timeout_timer(key, caller_pid, opts) do
+    repo_timeout = opts[:timeout] || @default_repo_timeout
+
+    if is_integer(repo_timeout) do
+      Process.send_after(self(), {:repo_timeout, key, caller_pid}, repo_timeout)
+    else
+      :no_timer
+    end
+  end
+
+  defp start_queue_timeout_timer(caller, mode, opts) do
     queue_timeout = opts[:queue_timeout] || @default_queue_timeout
 
     if is_integer(queue_timeout) do
@@ -350,8 +402,8 @@ defmodule Feeb.DB.Repo.Manager do
     end
   end
 
-  defp stop_timeout_timer(ref) when is_reference(ref), do: Process.cancel_timer(ref)
-  defp stop_timeout_timer(:no_timer), do: :noop
+  defp stop_timer(ref) when is_reference(ref), do: Process.cancel_timer(ref)
+  defp stop_timer(:no_timer), do: :noop
 
   defp log(level, msg, state, extra_ctx \\ []) do
     log_fn =
