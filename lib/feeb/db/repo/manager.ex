@@ -43,7 +43,7 @@ defmodule Feeb.DB.Repo.Manager do
   alias Feeb.DB.Repo
 
   # Time (in ms) after which we should issue a warning for requests waiting in the queue. This can
-  # be override with the `:queue_warning_threshold` key in `opts` (accepts `:infinity`).
+  # be overriden with the `:queue_warning_threshold` key in `opts` (accepts `:infinity`).
   @default_queue_warning_threshold 50
 
   # Default time (in ms) that a request can wait for an available connection. This can be overriden
