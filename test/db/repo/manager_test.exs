@@ -328,9 +328,14 @@ defmodule Feeb.DB.Repo.ManagerTest do
   describe "monitoring logic - leasee's living forever" do
     test "raises a timeout exception when leasee exceeded the timeout", %{manager: manager} do
       # We'll start a connection and specify it should be released within 25ms
-      assert {:ok, _repo} = Manager.fetch_connection(manager, :write, timeout: 25)
+      assert {:ok, repo} = Manager.fetch_connection(manager, :write, timeout: 25)
 
-      # TODO: Assert that the Repo internal state was "released" too
+      # The leasee actually started a DB transaction
+      assert :ok == GenServer.call(repo, {:begin, :exclusive})
+
+      # And there is a `transaction_id` reference in the Repo state
+      repo_state = :sys.get_state(repo)
+      assert repo_state.transaction_id
 
       # We didn't release it, so within 25ms (plus overhead) we received an :EXIT signal
       Process.flag(:trap_exit, true)
@@ -342,6 +347,10 @@ defmodule Feeb.DB.Repo.ManagerTest do
       refute manager_state.write_1.caller_pid
       refute manager_state.write_1.timer_ref
       refute manager_state.write_1.monitor_ref
+
+      # The Repo state was updated -- the transaction rolled back and its reference was reset
+      repo_state = :sys.get_state(repo)
+      refute repo_state.transaction_id
 
       # And we can actually grab it again
       assert {:ok, _} = Manager.fetch_connection(manager, :write)

@@ -11,29 +11,38 @@ defmodule Feeb.DB.Repo do
   @env Mix.env()
   @is_test_mode Application.compile_env(:feebdb, :is_test_mode, false)
 
+  def get_path(context, shard_id),
+    do: "#{Config.data_dir()}/#{context}/#{shard_id}.db"
+
   # Callbacks
 
   # Client API
+  def start_link({_, _, _, _} = repo_args),
+    do: start_link(Tuple.append(repo_args, nil))
 
-  def start_link({_, _, _, _} = args) do
-    GenServer.start_link(__MODULE__, args)
-  end
-
-  def get_path(context, shard_id),
-    do: "#{Config.data_dir()}/#{context}/#{shard_id}.db"
+  def start_link({_, _, _, _, _} = all_args),
+    do: GenServer.start_link(__MODULE__, all_args)
 
   def close(pid),
     do: GenServer.call(pid, {:close})
 
+  @doc """
+  Used by the Repo.Manager to notify once the Repo has been released. Useful to resetting internal
+  counters, transaction_id etc.
+  """
+  def notify_release(pid),
+    do: GenServer.call(pid, {:mgt_connection_released})
+
   # Server API
 
-  def init({context, shard_id, path, mode}) do
+  def init({context, shard_id, path, mode, manager_pid}) do
     Logger.info("Starting #{mode} repo for shard #{shard_id}@#{context}")
     true = mode in [:readwrite, :readonly]
 
     case SQLite.open(path) do
       {:ok, conn} ->
         state = %{
+          manager_pid: manager_pid,
           context: context,
           shard_id: shard_id,
           mode: mode,
@@ -43,7 +52,7 @@ defmodule Feeb.DB.Repo do
         }
 
         # `repo_config` is metadata that the Schema has access to when building virtual fields
-        repo_config = Map.drop(state, [:transaction_id, :conn])
+        repo_config = Map.drop(state, [:transaction_id, :conn, :manager_pid])
         Process.put(:repo_config, repo_config)
 
         {:ok, state, {:continue, :bootstrap}}
@@ -131,6 +140,19 @@ defmodule Feeb.DB.Repo do
         Feeb.DB.commit()
         {:noreply, state}
     end
+  end
+
+  def handle_call({:mgt_connection_released}, {caller_pid, _}, state) do
+    # Make sure only the Repo.Manager can send mgt signals to the Repo.
+    assert_release_signal_from_manager!(state.manager_pid, caller_pid)
+
+    if not is_nil(state.transaction_id) do
+      Logger.info("Connection released forcibly; rolling back transaction #{state.transaction_id}")
+      :ok = SQLite.exec(state.conn, "ROLLBACK")
+    end
+
+    # Reset the GenServer state so we are ready to serve a new request
+    {:reply, :ok, %{state | transaction_id: nil}}
   end
 
   def handle_call({:close}, _from, %{transaction_id: nil} = state) do
@@ -372,5 +394,16 @@ defmodule Feeb.DB.Repo do
       other_value ->
         other_value
     end)
+  end
+
+  defp assert_release_signal_from_manager!(manager_pid, manager_pid), do: :ok
+
+  if @env == :test do
+    defp assert_release_signal_from_manager!(nil, _caller_pid), do: :ok
+  end
+
+  defp assert_release_signal_from_manager!(manager_pid, other_pid) do
+    "Repo can only be released by its Manager (#{inspect(manager_pid)}, got #{inspect(other_pid)})"
+    |> raise()
   end
 end

@@ -40,6 +40,7 @@ defmodule Feeb.DB.Repo.Manager do
 
   use GenServer
   require Logger
+  alias Feeb.DB.Repo
 
   # Time (in ms) after which we should issue a warning for requests waiting in the queue. This can
   # be override with the `:queue_warning_threshold` key in `opts` (accepts `:infinity`).
@@ -138,8 +139,6 @@ defmodule Feeb.DB.Repo.Manager do
       %{pid: repo_pid, busy?: true, caller_pid: ^caller_pid} ->
         # Kill the caller
         Process.exit(caller_pid, :feebdb_repo_timeout)
-
-        # TODO: We need to notify the Repo so it resets any counters, transaction references etc
 
         # Release the connection. It is supposed to always succeed
         {:ok, ^key, new_state} = do_release_connection(state, repo_pid)
@@ -246,6 +245,9 @@ defmodule Feeb.DB.Repo.Manager do
         # Stop the repo_timeout timer
         stop_timer(get_in(state, [key, :timer_ref]))
 
+        # Notify the Repo that it's been released
+        :ok = Repo.notify_release(pid)
+
         new_state =
           state
           |> put_in([key, :busy?], false)
@@ -280,10 +282,10 @@ defmodule Feeb.DB.Repo.Manager do
 
   defp establish_connection(%{shard_id: shard_id, context: context} = state, key) do
     mode = if(key == :write_1, do: :readwrite, else: :readonly)
-    db_path = Feeb.DB.Repo.get_path(context, shard_id)
+    db_path = Repo.get_path(context, shard_id)
 
     # REVIEW: Do I really want to link both genservers?
-    case Feeb.DB.Repo.start_link({context, shard_id, db_path, mode}) do
+    case Repo.start_link({context, shard_id, db_path, mode}) do
       {:ok, repo_pid} ->
         log(:info, "Established and fetched #{mode} connection", state)
 
