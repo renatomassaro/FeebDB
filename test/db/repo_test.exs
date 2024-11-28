@@ -106,7 +106,7 @@ defmodule Feeb.DB.RepoTest do
       assert {:error, :already_in_transaction} ==
                GS.call(repo, {:begin, :exclusive})
 
-      # Proof that we are in a transaction: we can rollback (only once, of colurse)
+      # Proof that we are in a transaction: we can rollback (only once, of course)
       c = :sys.get_state(repo).conn
       assert {:ok, _} = SQLite.raw(c, "ROLLBACK")
       assert {:error, "cannot rollback - no transaction is active"} = SQLite.raw(c, "ROLLBACK")

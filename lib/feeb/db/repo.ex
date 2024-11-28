@@ -4,9 +4,14 @@ defmodule Feeb.DB.Repo do
   # This can be removed once the usage of `DB.prepared_raw/3` is consolidated
   @dialyzer {:nowarn_function, format_custom: 3}
 
+  @struct_keys [:manager_pid, :context, :shard_id, :mode, :path, :conn, :transaction_id]
+  @enforce_keys List.delete(@struct_keys, [:transaction_id])
+  defstruct @struct_keys
+
   use GenServer
   require Logger
   alias Feeb.DB.{Config, Migrator, Query, Schema, SQLite}
+  alias __MODULE__.RepoConfig
 
   @env Mix.env()
   @is_test_mode Application.compile_env(:feebdb, :is_test_mode, false)
@@ -38,7 +43,7 @@ defmodule Feeb.DB.Repo do
 
     case SQLite.open(path) do
       {:ok, conn} ->
-        state = %{
+        state = %__MODULE__{
           manager_pid: manager_pid,
           context: context,
           shard_id: shard_id,
@@ -49,7 +54,7 @@ defmodule Feeb.DB.Repo do
         }
 
         # `repo_config` is metadata that the Schema has access to when building virtual fields
-        repo_config = Map.drop(state, [:transaction_id, :conn, :manager_pid])
+        repo_config = RepoConfig.from_state(state)
         Process.put(:repo_config, repo_config)
 
         {:ok, state, {:continue, :bootstrap}}
