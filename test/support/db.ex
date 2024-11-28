@@ -27,7 +27,7 @@ defmodule Test.Feeb.DB do
     path = Repo.get_path(context, shard_id)
 
     # The repo will automatically set up and migrate (if needed)
-    {:ok, pid} = Repo.start_link({context, shard_id, path, :readwrite})
+    {:ok, pid} = Repo.start_link({context, shard_id, path, :readwrite, nil})
 
     # We need to close it in order to synchronously finish the migration
     GenServer.call(pid, {:close})

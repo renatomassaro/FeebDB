@@ -17,11 +17,8 @@ defmodule Feeb.DB.Repo do
   # Callbacks
 
   # Client API
-  def start_link({_, _, _, _} = repo_args),
-    do: start_link(Tuple.append(repo_args, nil))
-
-  def start_link({_, _, _, _, _} = all_args),
-    do: GenServer.start_link(__MODULE__, all_args)
+  def start_link({_, _, _, _, _} = args),
+    do: GenServer.start_link(__MODULE__, args)
 
   def close(pid),
     do: GenServer.call(pid, {:close})

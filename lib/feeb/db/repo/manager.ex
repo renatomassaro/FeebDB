@@ -285,7 +285,7 @@ defmodule Feeb.DB.Repo.Manager do
     db_path = Repo.get_path(context, shard_id)
 
     # REVIEW: Do I really want to link both genservers?
-    case Repo.start_link({context, shard_id, db_path, mode}) do
+    case Repo.start_link({context, shard_id, db_path, mode, self()}) do
       {:ok, repo_pid} ->
         log(:info, "Established and fetched #{mode} connection", state)
 

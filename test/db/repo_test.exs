@@ -23,7 +23,7 @@ defmodule Feeb.DB.RepoTest do
     @describetag skip_init: true
 
     test "in readwrite mode", %{shard_id: shard_id, db: db} do
-      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readwrite}})
+      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readwrite, nil}})
 
       state = :sys.get_state(pid)
       c = state.conn
@@ -48,7 +48,7 @@ defmodule Feeb.DB.RepoTest do
     end
 
     test "in readonly mode", %{shard_id: shard_id, db: db} do
-      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readonly}})
+      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readonly, nil}})
 
       state = :sys.get_state(pid)
       c = state.conn
