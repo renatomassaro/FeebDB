@@ -1,5 +1,6 @@
 defmodule Test.Feeb.DB.Prop do
   alias Feeb.DB.{SQLite}
+  alias Feeb.DB
   alias __MODULE__
 
   def create(context) do
@@ -21,11 +22,11 @@ defmodule Test.Feeb.DB.Prop do
     File.rm(prop_path)
 
     # Create them (in data dir)
-    Feeb.DB.begin(ctx_name, -99, :write)
-    Feeb.DB.commit()
+    DB.begin(ctx_name, -99, :write)
+    DB.commit()
 
     # Make sure the DB in datadir is synced
-    db_path = Feeb.DB.Repo.get_path(ctx_name, -99)
+    db_path = DB.Repo.get_path(ctx_name, -99)
     {:ok, db_conn} = SQLite.open(db_path)
     :ok = SQLite.exec(db_conn, "PRAGMA wal_checkpoint(TRUNCATE)")
     SQLite.close(db_conn)

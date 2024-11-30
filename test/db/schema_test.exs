@@ -110,7 +110,7 @@ defmodule DB.SchemaTest do
       assert monica.divorce_count == 0
 
       expected_repo_config =
-        %{
+        %DB.Repo.RepoConfig{
           context: @context,
           shard_id: shard_id,
           mode: :readonly,

@@ -9,7 +9,7 @@ defmodule Feeb.DB.RepoTest do
   setup %{shard_id: shard_id, db: db} = flags do
     repo_pid =
       unless Map.get(flags, :skip_init, false) do
-        {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readwrite}})
+        {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readwrite, nil}})
 
         pid
       else
@@ -23,7 +23,7 @@ defmodule Feeb.DB.RepoTest do
     @describetag skip_init: true
 
     test "in readwrite mode", %{shard_id: shard_id, db: db} do
-      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readwrite}})
+      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readwrite, nil}})
 
       state = :sys.get_state(pid)
       c = state.conn
@@ -48,7 +48,7 @@ defmodule Feeb.DB.RepoTest do
     end
 
     test "in readonly mode", %{shard_id: shard_id, db: db} do
-      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readonly}})
+      assert {:ok, pid} = start_supervised({Repo, {@context, shard_id, db, :readonly, nil}})
 
       state = :sys.get_state(pid)
       c = state.conn
@@ -74,7 +74,7 @@ defmodule Feeb.DB.RepoTest do
 
       %{message: reason} =
         assert_raise RuntimeError, fn ->
-          Repo.init({@context, 123, db, :readwrite})
+          Repo.init({@context, 123, db, :readwrite, nil})
         end
 
       assert reason =~ "Unable to open database"
@@ -93,6 +93,10 @@ defmodule Feeb.DB.RepoTest do
       # No longer in a transaction once we commit
       assert :ok == GS.call(repo, {:commit})
       refute :sys.get_state(repo).transaction_id
+
+      # Proof that we are no longer in a transaction: rollback won't work
+      c = :sys.get_state(repo).conn
+      assert {:error, "cannot rollback - no transaction is active"} = SQLite.raw(c, "ROLLBACK")
     end
 
     @tag capture_log: true
@@ -101,6 +105,11 @@ defmodule Feeb.DB.RepoTest do
 
       assert {:error, :already_in_transaction} ==
                GS.call(repo, {:begin, :exclusive})
+
+      # Proof that we are in a transaction: we can rollback (only once, of course)
+      c = :sys.get_state(repo).conn
+      assert {:ok, _} = SQLite.raw(c, "ROLLBACK")
+      assert {:error, "cannot rollback - no transaction is active"} = SQLite.raw(c, "ROLLBACK")
     end
 
     @tag capture_log: true
@@ -189,6 +198,59 @@ defmodule Feeb.DB.RepoTest do
       # We can close it
       assert :ok == GS.call(repo, {:close})
       refute Process.alive?(repo)
+    end
+  end
+
+  describe "handle_call: mgt_connection_released" do
+    test "performs a no-op on the regular lifecycle", %{repo: repo} do
+      # This Repo had a regular lifecycle: it started a transaction
+      assert :ok == GS.call(repo, {:begin, :exclusive})
+      assert :sys.get_state(repo).transaction_id
+
+      # And then it committed, which resets the transaction_id
+      assert :ok == GS.call(repo, {:commit})
+      state_after_commit = :sys.get_state(repo)
+      refute state_after_commit.transaction_id
+
+      assert :ok == GS.call(repo, {:mgt_connection_released})
+      state_after_release = :sys.get_state(repo)
+
+      # Nothing changes when the connection is released
+      assert state_after_release == state_after_commit
+    end
+
+    test "rolls back transaction if one exists", %{repo: repo} do
+      # We are in a transaction
+      assert :ok == GS.call(repo, {:begin, :exclusive})
+      assert :sys.get_state(repo).transaction_id
+
+      # Let's assume mgt_connection_released was called with an active transaction -- that means the
+      # caller was forced to end its connection (e.g. due to timeout or caller dying)
+      assert :ok == GS.call(repo, {:mgt_connection_released})
+      refute :sys.get_state(repo).transaction_id
+
+      # If we try to ROLLBACK, SQLite yells at us saying there's no open transaction
+      c = :sys.get_state(repo).conn
+      assert {:error, "cannot rollback - no transaction is active"} = SQLite.raw(c, "ROLLBACK")
+    end
+
+    @tag capture_log: true
+    test "only the repo manager can send the release signal", %{shard_id: shard_id, db: db} do
+      assert {:ok, repo} = Repo.start_link({@context, shard_id, db, :readwrite, self()})
+
+      # It works if called from the same process (here, test process == manager process)
+      assert :ok == GS.call(repo, {:mgt_connection_released})
+
+      # It blows up if called from elsewhere
+      spawn(fn ->
+        GS.call(repo, {:mgt_connection_released})
+        block_forever()
+      end)
+
+      # The Repo died abruptly because someone other than the Manager tried to release it
+      Process.flag(:trap_exit, true)
+      assert_receive {:EXIT, ^repo, {%RuntimeError{message: error}, _stacktrace}}, 100
+      assert error =~ "Repo can only be released by its Manager"
     end
   end
 end

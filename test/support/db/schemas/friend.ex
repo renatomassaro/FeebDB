@@ -1,5 +1,6 @@
 defmodule Sample.Friend do
   use Feeb.DB.Schema
+  alias Feeb.DB
   alias Feeb.DB.Schema
 
   @context :test
@@ -18,7 +19,7 @@ defmodule Sample.Friend do
     |> Schema.create()
   end
 
-  def get_repo_config(_row, repo_config),
+  def get_repo_config(_row, %DB.Repo.RepoConfig{} = repo_config),
     do: repo_config
 
   def get_divorce_count(%{name: name}, _) do

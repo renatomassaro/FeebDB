@@ -121,6 +121,27 @@ defmodule Feeb.DB.Repo.ManagerTest do
       assert {:ok, repo_w} == Manager.fetch_connection(manager, :write)
       assert {:ok, repo_r} == Manager.fetch_connection(manager, :read)
     end
+
+    test "cancels the repo_timeout timer after release", %{manager: manager} do
+      assert {:ok, repo} = Manager.fetch_connection(manager, :write)
+
+      # timer_ref is set when the connection is held by this process
+      state_before = :sys.get_state(manager)
+      assert state_before.write_1.busy?
+      assert state_before.write_1.timer_ref
+      assert state_before.write_1.monitor_ref
+
+      assert :ok == Manager.release_connection(manager, repo)
+
+      # Once released, timer_ref was emptied
+      state_after = :sys.get_state(manager)
+      refute state_after.write_1.busy?
+      refute state_after.write_1.timer_ref
+      refute state_after.write_1.monitor_ref
+
+      # The `false` return here means the timer could not be found -- because it was canceled
+      assert false == Process.cancel_timer(state_before.write_1.timer_ref)
+    end
   end
 
   describe "close_connection/2" do
@@ -216,6 +237,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
         spawn_and_wait(fn ->
           Manager.fetch_connection(manager, :write, queue_timeout: :infinity)
           send(test_pid, :got_connection)
+          block_forever()
         end)
 
       # Initially, both `spawn_pid_1` and `spawn_pid_2` are in the queue (in that order)
@@ -238,6 +260,108 @@ defmodule Feeb.DB.Repo.ManagerTest do
       # See? `spawn_pid_2` was awarded the connection despite `spawn_pid_1` dying in front of it.
       # Erlang can be brutal sometimes
       assert_receive :got_connection, 50
+    end
+  end
+
+  describe "monitoring logic - leasee's death" do
+    test "when process holding connection dies, connection is released", %{manager: manager} do
+      request_pid =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write)
+          block_forever()
+        end)
+
+      # The Repo.Manager currently has an active write_1 connection leased to `request_pid`
+      state_before = :sys.get_state(manager)
+      assert state_before.write_1.busy?
+      assert state_before.write_1.caller_pid == request_pid
+
+      # Now we kill `request_pid`
+      Process.exit(request_pid, :kill)
+
+      # Give ample time for the `handle_info({:DOWN, ...})` callback to run
+      :timer.sleep(10)
+
+      # With the death of `request_pid`, the write_1 connection is now available to be picked up
+      state_after = :sys.get_state(manager)
+      refute state_after.write_1.busy?
+      assert state_after.write_1.caller_pid == nil
+      assert state_after.write_1.monitor_ref == nil
+    end
+
+    test "on caller's death, requests on the queue get served", %{manager: manager} do
+      request_pid =
+        spawn_and_wait(fn ->
+          Manager.fetch_connection(manager, :write)
+          block_forever()
+        end)
+
+      queued_request_pid =
+        spawn_and_wait(fn ->
+          # This guy is waiting for `request_pid` to release the connection
+          Manager.fetch_connection(manager, :write)
+          block_forever()
+        end)
+
+      # The write_1 connection is busy (leased to `request_pid`) and there is a non-empty queue
+      state_before = :sys.get_state(manager)
+      assert state_before.write_1.busy?
+      assert state_before.write_1.caller_pid == request_pid
+      assert :queue.len(state_before.write_queue) == 1
+
+      # Now we kill `request_pid`
+      Process.exit(request_pid, :kill)
+
+      # Give ample time for the `handle_info({:DOWN, ...})` callback to run
+      :timer.sleep(10)
+
+      # Now, the write_1 connection is still busy, but leased to `queued_request_pid` instead.
+      # The write_queue is now empty
+      state_after = :sys.get_state(manager)
+      assert state_after.write_1.busy?
+      assert state_after.write_1.caller_pid == queued_request_pid
+      assert state_after.write_1.monitor_ref != state_before.write_1.monitor_ref
+      assert :queue.len(state_after.write_queue) == 0
+    end
+  end
+
+  describe "monitoring logic - leasee's living forever" do
+    test "raises a timeout exception when leasee exceeded the timeout", %{manager: manager} do
+      # We'll start a connection and specify it should be released within 25ms
+      assert {:ok, repo} = Manager.fetch_connection(manager, :write, timeout: 25)
+
+      # The leasee actually started a DB transaction
+      assert :ok == GenServer.call(repo, {:begin, :exclusive})
+
+      # And there is a `transaction_id` reference in the Repo state
+      repo_state = :sys.get_state(repo)
+      assert repo_state.transaction_id
+
+      # We didn't release it, so within 25ms (plus overhead) we received an :EXIT signal
+      Process.flag(:trap_exit, true)
+      assert_receive {:EXIT, manager, :feebdb_repo_timeout}, 50
+
+      # The manager state was updated to make sure the `:write_1` connection is free again
+      manager_state = :sys.get_state(manager)
+      refute manager_state.write_1.busy?
+      refute manager_state.write_1.caller_pid
+      refute manager_state.write_1.timer_ref
+      refute manager_state.write_1.monitor_ref
+
+      # The Repo state was updated -- the transaction rolled back and its reference was reset
+      repo_state = :sys.get_state(repo)
+      refute repo_state.transaction_id
+
+      # And we can actually grab it again
+      assert {:ok, _} = Manager.fetch_connection(manager, :write)
+    end
+
+    test "allows for infinite timeout", %{manager: manager} do
+      assert {:ok, _repo} = Manager.fetch_connection(manager, :write, timeout: :infinity)
+
+      # When `timeout: :infinity` we don't create a Repo timeout timer
+      manager_state = :sys.get_state(manager)
+      assert manager_state.write_1.timer_ref == :no_timer
     end
   end
 end

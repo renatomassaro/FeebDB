@@ -1,6 +1,7 @@
 defmodule Feeb.DB.Repo.Manager.RegistryTest do
   use Test.Feeb.DBCase, async: true
   import ExUnit.CaptureLog
+  alias Feeb.DB.Repo.Manager
   alias Feeb.DB.Repo.Manager.Registry
 
   @ets_table_name :feebdb_manager_registry
@@ -16,9 +17,10 @@ defmodule Feeb.DB.Repo.Manager.RegistryTest do
       manager_state = :sys.get_state(manager_pid)
       assert manager_state.context == :test
       assert manager_state.shard_id == shard_id
-      assert manager_state.write_1 == %{pid: nil, busy?: false}
-      assert manager_state.read_1 == %{pid: nil, busy?: false}
-      assert manager_state.read_2 == %{pid: nil, busy?: false}
+
+      assert manager_state.write_1 == Manager.RepoEntry.on_start()
+      assert manager_state.read_1 == Manager.RepoEntry.on_start()
+      assert manager_state.read_2 == Manager.RepoEntry.on_start()
 
       # The manager PID is stored in the ETS registry table
       assert [{{:test, shard_id}, manager_pid}] == :ets.lookup(@ets_table_name, {:test, shard_id})
