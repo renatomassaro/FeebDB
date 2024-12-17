@@ -74,10 +74,20 @@ defmodule Feeb.DB.Schema do
         |> Map.new()
         |> Map.keys()
 
+      after_read_fields =
+        Enum.reduce(normalized_schema, [], fn {field, {_, opts, _}}, acc ->
+          if after_read = opts[:after_read] do
+            [{field, after_read} | acc]
+          else
+            acc
+          end
+        end)
+
       @schema normalized_schema
       @modded_fields modded_fields
       @sorted_cols sorted_cols
       @virtual_cols virtual_cols
+      @after_read_fields after_read_fields
 
       if is_nil(Module.get_attribute(__MODULE__, :derived_fields)) do
         @derived_fields []
@@ -90,6 +100,7 @@ defmodule Feeb.DB.Schema do
       def __schema__, do: @schema
       def __cols__, do: @sorted_cols
       def __virtual_cols__, do: @virtual_cols
+      def __after_read_fields__, do: @after_read_fields
       def __table__, do: @table
       def __context__, do: @context
       def __modded_fields__, do: @modded_fields
@@ -260,6 +271,7 @@ defmodule Feeb.DB.Schema do
     schema = model.__schema__()
     table_fields = model.__cols__()
     virtual_fields = model.__virtual_cols__()
+    after_read_fields = model.__after_read_fields__()
     fields_to_populate = if fields == [:*], do: table_fields, else: fields
 
     # TODO: Test this a lot...
@@ -290,9 +302,9 @@ defmodule Feeb.DB.Schema do
     values =
       fields_to_populate
       |> Enum.zip(row)
-      |> Enum.map(fn {field, v} ->
+      |> Enum.map(fn {field, raw_value} ->
         {type_module, opts, _mod} = Map.fetch!(schema, field)
-        {field, type_module.load!(v, opts, {model, field})}
+        {field, type_module.load!(raw_value, opts, {model, field})}
       end)
 
     model
@@ -300,6 +312,7 @@ defmodule Feeb.DB.Schema do
     |> Map.put(:__meta__, %{origin: :db})
     |> add_missing_values(table_fields, fields_to_populate)
     |> add_virtual_fields(virtual_fields, schema)
+    |> trigger_after_read_callbacks(after_read_fields)
   end
 
   def cast_value!(schema_mod, schema, field, raw_value) do
@@ -374,6 +387,16 @@ defmodule Feeb.DB.Schema do
 
       value = apply(struct.__struct__, virtual_fn, [struct, repo_config])
       Map.put(acc, field_name, value)
+    end)
+  end
+
+  defp trigger_after_read_callbacks(struct, []), do: struct
+
+  defp trigger_after_read_callbacks(struct, after_read_fields) do
+    Enum.reduce(after_read_fields, struct, fn {field, callback}, acc ->
+      old_value = Map.get(struct, field)
+      new_value = apply(struct.__struct__, callback, [old_value, struct])
+      Map.put(acc, field, new_value)
     end)
   end
 end

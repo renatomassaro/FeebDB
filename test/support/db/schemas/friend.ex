@@ -10,6 +10,7 @@ defmodule Sample.Friend do
     {:id, :integer},
     {:name, :string},
     {:divorce_count, {:integer, virtual: :get_divorce_count}},
+    {:sibling_count, {:integer, nullable: true, after_read: :get_sibling_count}},
     {:repo_config, {:map, virtual: :get_repo_config}}
   ]
 
@@ -36,6 +37,19 @@ defmodule Sample.Friend do
 
       _ ->
         0
+    end
+  end
+
+  def get_sibling_count(_, %{name: name}) do
+    case name do
+      "Joey" ->
+        7
+
+      "Rachel" ->
+        2
+
+      _ ->
+        1
     end
   end
 end
