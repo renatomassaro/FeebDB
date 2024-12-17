@@ -1,4 +1,5 @@
 CREATE TABLE friends (
   id INTEGER PRIMARY KEY,
-  name TEXT
+  name TEXT,
+  sibling_count INTEGER
 ) STRICT, WITHOUT ROWID;

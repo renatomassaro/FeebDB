@@ -29,7 +29,7 @@ defmodule DB.SchemaTest do
 
   describe "generated: __cols__/0" do
     test "includes all non-virtual fields in order" do
-      assert [:id, :name] == Friend.__cols__()
+      assert [:id, :name, :sibling_count] == Friend.__cols__()
 
       assert [
                :boolean,
@@ -121,6 +121,20 @@ defmodule DB.SchemaTest do
       assert phoebe.repo_config == expected_repo_config
       assert rachel.repo_config == expected_repo_config
       assert monica.repo_config == expected_repo_config
+    end
+  end
+
+  describe "after_read" do
+    test "columns with after_read are post-processed", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :read)
+
+      joey = DB.one({:friends, :get_by_name}, "Joey")
+      rachel = DB.one({:friends, :get_by_name}, "Rachel")
+      pheebs = DB.one({:friends, :get_by_name}, "Phoebe")
+
+      assert joey.sibling_count == 7
+      assert rachel.sibling_count == 2
+      assert pheebs.sibling_count == 1
     end
   end
 end

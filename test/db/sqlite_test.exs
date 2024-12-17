@@ -36,7 +36,7 @@ defmodule Feeb.DB.SQLiteTest do
     test "returns an entry if found", %{c: c} do
       {:ok, stmt} = SQLite.prepare(c, "SELECT * FROM friends WHERE id = ?")
       :ok = SQLite.bind(c, stmt, [1])
-      assert {:ok, [1, "Phoebe"]} == SQLite.one(c, stmt)
+      assert {:ok, [1, "Phoebe", nil]} == SQLite.one(c, stmt)
     end
 
     test "returns nil if not found", %{c: c} do
