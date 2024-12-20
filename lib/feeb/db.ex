@@ -260,8 +260,6 @@ defmodule Feeb.DB do
 
   defp setup_env(context, shard_id, type, opts) when type in [:write, :read] do
     {:ok, manager_pid} = Repo.Manager.Registry.fetch_or_create(context, shard_id)
-
-    # TODO: Handle busy
     {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type, opts)
 
     LocalState.add_entry(context, shard_id, {manager_pid, repo_pid, type})
