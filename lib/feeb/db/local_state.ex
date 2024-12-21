@@ -5,38 +5,32 @@ defmodule Feeb.DB.LocalState do
 
   require Logger
 
+  alias Utils.Stack
+
+  # TODO: Most of these types should be defined at `Feeb.DB`
+  @typep context :: atom()
+  @typep shard_id :: integer()
+  @typep access_type :: :read | :write
+
   @typep entry :: %{
-           context: atom(),
-           shard_id: integer(),
+           context: context,
+           shard_id: shard_id,
            manager_pid: pid(),
            repo_pid: pid(),
-           access_type: :read | :write
+           access_type: access_type
          }
 
-  def set_current_context(context, shard_id) do
-    if not context_exists?({context, shard_id}),
-      do: raise("Attempted to set a context that doesn't exist: #{inspect({context, shard_id})}")
-
-    Process.put(:feebdb_current_context, {context, shard_id})
-  end
-
-  def unset_current_context do
-    Process.put(:feebdb_current_context, nil)
-  end
-
-  @spec get_current_context!() :: entry
-  def get_current_context! do
-    {context, shard_id} = Process.get(:feebdb_current_context) || raise "Current context not set"
-    state = Process.get(:feebdb_state)
-    Map.fetch!(state, {context, shard_id})
-  end
-
-  def add_entry(context, shard_id, {manager_pid, repo_pid, access_type}) do
+  @doc """
+  Creates a new context.
+  """
+  @spec add_context(context, shard_id, {pid(), pid(), access_type}) ::
+          :ok
+  def add_context(context, shard_id, {manager_pid, repo_pid, access_type}) do
     true = is_pid(manager_pid)
     true = is_pid(repo_pid)
     true = access_type in [:read, :write]
 
-    entry = %{
+    state = %{
       context: context,
       shard_id: shard_id,
       manager_pid: manager_pid,
@@ -44,33 +38,68 @@ defmodule Feeb.DB.LocalState do
       access_type: access_type
     }
 
-    key = {context, shard_id}
-
-    feebdb_state = Process.get(:feebdb_state, %{})
-
-    if Map.has_key?(feebdb_state, key),
-      do: Logger.warning("Adding LocalState entry to a key that already exists: #{inspect(key)}")
-
-    new_state = Map.put(feebdb_state, {context, shard_id}, entry)
-
-    Process.put(:feebdb_state, new_state)
+    Process.put(:feebdb_contexts, Stack.push(contexts(), state))
   end
 
-  def remove_entry(context, shard_id) do
-    state = Process.get(:feebdb_state) || raise "No LocalState found"
+  @doc """
+  Sets the current context to be the given one.
 
-    if not Map.has_key?(state, {context, shard_id}) do
-      "Attempted to delete #{inspect({context, shard_id})} from State but it no longer exists"
-      |> Logger.warning()
+  The given context must exist.
+  """
+  @spec set_current_context(context, shard_id) ::
+          :ok
+  def set_current_context(context, shard_id) do
+    if not context_exists?({context, shard_id}),
+      do: raise("Attempted to set a context that doesn't exist: #{inspect({context, shard_id})}")
+
+    {:ok, {stack, state}} =
+      Stack.remove(contexts(), fn %{context: c, shard_id: s} ->
+        c == context && s == shard_id
+      end)
+
+    Process.put(:feebdb_contexts, Stack.push(stack, state))
+  end
+
+  @doc """
+  Removes the current context. Once removed, the new current context will be the topmost element in
+  the stack (if any).
+  """
+  @spec remove_current_context() :: :ok
+  def remove_current_context do
+    true = not Stack.empty?(contexts()) || raise "Can't remove context from empty stack"
+    {:ok, {new_contexts, _state}} = Stack.pop(contexts())
+    Process.put(:feebdb_contexts, new_contexts)
+  end
+
+  @spec get_current_context!() :: entry | nil
+  def get_current_context do
+    case Stack.peek(contexts()) do
+      {:ok, state} -> state
+      {:error, :empty} -> nil
     end
-
-    new_state = Map.drop(state, [{context, shard_id}])
-    Process.put(:feebdb_state, new_state)
   end
 
-  defp context_exists?({_context, _shard_id} = key),
-    do: context_exists?(Process.get(:feebdb_state, %{}), key)
+  @spec get_current_context!() :: entry | no_return
+  def get_current_context! do
+    case get_current_context() do
+      %{} = state -> state
+      nil -> raise "Current context not set"
+    end
+  end
 
-  defp context_exists?(state, {_context, _shard_id} = key),
-    do: Map.has_key?(state, key)
+  @spec has_current_context?() :: boolean
+  def has_current_context?,
+    do: not is_nil(get_current_context())
+
+  @spec count_open_contexts() :: integer
+  def count_open_contexts,
+    do: Stack.size(contexts())
+
+  defp context_exists?({context, shard_id}) do
+    Stack.any?(contexts(), fn %{context: c, shard_id: s} -> c == context and s == shard_id end)
+  end
+
+  @spec contexts :: Stack.t(entry)
+  defp contexts,
+    do: Process.get(:feebdb_contexts, Stack.new())
 end

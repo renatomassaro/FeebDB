@@ -1,17 +1,19 @@
 defmodule Feeb.DB.LocalStateTest do
   use ExUnit.Case, async: true
-  import ExUnit.CaptureLog
+  alias Utils.Stack
   alias Feeb.DB.LocalState
 
-  describe "add_entry/3" do
-    test "adds a new entry" do
-      # Initially, the `feebdb_state` is empty
-      refute state_var()
+  describe "add_context/3" do
+    test "adds a new context entry" do
+      # Initially, there are no contexts
+      refute contexts()
 
       # Add an entry to the state
-      LocalState.add_entry(:context, 1, {self(), self(), :write})
+      LocalState.add_context(:context, 1, {self(), self(), :write})
 
-      assert %{{:context, 1} => entry} = state_var()
+      refute Stack.empty?(contexts())
+
+      assert %Stack{entries: [entry]} = contexts()
       assert entry.context == :context
       assert entry.shard_id == 1
       assert entry.manager_pid == self()
@@ -21,72 +23,76 @@ defmodule Feeb.DB.LocalStateTest do
 
     test "supports multiple concurrent entries" do
       # Initially, the `feebdb_state` is empty
-      refute state_var()
+      refute contexts()
 
       # Add several entries to the state
-      LocalState.add_entry(:context, 1, {self(), self(), :read})
-      LocalState.add_entry(:context, 2, {self(), self(), :write})
-      LocalState.add_entry(:context, 3, {self(), self(), :write})
-      LocalState.add_entry(:other_context, 1, {self(), self(), :write})
+      LocalState.add_context(:ctx, 1, {self(), self(), :read})
+      LocalState.add_context(:ctx, 2, {self(), self(), :write})
+      LocalState.add_context(:ctx, 3, {self(), self(), :write})
+      LocalState.add_context(:other, 1, {self(), self(), :write})
 
-      state = state_var()
-      assert Enum.find(state, fn {key, _} -> key == {:context, 1} end)
-      assert Enum.find(state, fn {key, _} -> key == {:context, 2} end)
-      assert Enum.find(state, fn {key, _} -> key == {:context, 3} end)
-      assert Enum.find(state, fn {key, _} -> key == {:other_context, 1} end)
+      assert Stack.find(contexts(), fn %{context: ctx, shard_id: s} -> ctx == :ctx && s == 1 end)
+      assert Stack.find(contexts(), fn %{context: ctx, shard_id: s} -> ctx == :ctx && s == 2 end)
+      assert Stack.find(contexts(), fn %{context: ctx, shard_id: s} -> ctx == :ctx && s == 3 end)
+      assert Stack.find(contexts(), fn %{context: ctx, shard_id: s} -> ctx == :other && s == 1 end)
     end
 
-    test "warns if the entry already exists" do
-      LocalState.add_entry(:context, 1, {self(), self(), :read})
+    test "supports duplicated entries" do
+      LocalState.add_context(:context, 1, {:c.pid(0, 10, 0), self(), :read})
+      LocalState.add_context(:context, 1, {:c.pid(0, 11, 0), self(), :read})
 
-      log =
-        capture_log(fn ->
-          # Repeated entry
-          LocalState.add_entry(:context, 1, {self(), self(), :read})
-        end)
+      with {:ok, {new_stack, second_entry}} <- Stack.pop(contexts()),
+           {:ok, {empty_stack, first_entry}} <- Stack.pop(new_stack) do
+        # The second entry is the topmost in the Stack. Once popped, we can get to the first entry
+        # Each one has the expected PIDs set for the manager
+        assert second_entry.manager_pid == :c.pid(0, 11, 0)
+        assert first_entry.manager_pid == :c.pid(0, 10, 0)
 
-      assert log =~ "[warning] Adding LocalState entry to a key that already exists"
-      assert log =~ "{:context, 1}"
+        # Once both are popped, the LocalState stack is empty
+        assert Stack.empty?(empty_stack)
+      end
     end
   end
 
-  describe "remove_entry/2" do
+  describe "remove_current_context/2" do
     test "removes the entry" do
       # Initially, the `feebdb_state` is empty
-      refute state_var()
+      refute contexts()
 
-      # Add an entry to the state
-      LocalState.add_entry(:context, 1, {self(), self(), :write})
-      LocalState.add_entry(:context, 2, {self(), self(), :write})
+      # Add a couple of entries to the state
+      LocalState.add_context(:context, 1, {self(), self(), :write})
+      LocalState.add_context(:context, 2, {self(), self(), :write})
 
-      # The entry can be found in the state var
-      assert %{{:context, 1} => _, {:context, 2} => _} = state_var()
+      # They are both stored correctly
+      assert Stack.find(contexts(), fn %{shard_id: s} -> s == 1 end)
+      assert Stack.find(contexts(), fn %{shard_id: s} -> s == 2 end)
 
-      # Remove one of the entries
-      LocalState.remove_entry(:context, 1)
+      # Remove the current (topmost) entry
+      LocalState.remove_current_context()
 
-      # Only the other entry is found in the state var
-      assert %{{:context, 2} => _} = state_var()
+      # Only the first entry is found in the state var
+      assert Stack.find(contexts(), fn %{shard_id: s} -> s == 1 end)
+      refute Stack.find(contexts(), fn %{shard_id: s} -> s == 2 end)
 
       # Which will be empty if we remove that one too
-      LocalState.remove_entry(:context, 2)
-      assert %{} == state_var()
+      LocalState.remove_current_context()
+      assert Stack.empty?(contexts())
     end
 
-    test "warns if the entry doesn't exist" do
-      # Assume `feebdb_state` is an empty map
-      Process.put(:feebdb_state, %{})
+    test "raises if the entry doesn't exist" do
+      assert %{message: error} =
+               assert_raise(RuntimeError, fn ->
+                 LocalState.remove_current_context()
+               end)
 
-      log = capture_log(fn -> LocalState.remove_entry(:context, 1) end)
-      assert log =~ "[warning] Attempted to delete {:context, 1} from State but it no longer exists"
+      assert error =~ "Can't remove context from empty stack"
     end
   end
 
   describe "get_current_context!/0" do
     test "returns the current context when set" do
       # There is something set as current context
-      LocalState.add_entry(:context, 1, {self(), self(), :read})
-      LocalState.set_current_context(:context, 1)
+      LocalState.add_context(:context, 1, {self(), self(), :read})
 
       state = LocalState.get_current_context!()
       assert state.context == :context
@@ -107,14 +113,20 @@ defmodule Feeb.DB.LocalStateTest do
   end
 
   describe "set_current_context/2" do
-    test "updates the Process state" do
-      # Initially, nothing exists in `current_context` even after we add a context entry
-      LocalState.add_entry(:context, 1, {self(), self(), :read})
-      refute current_context_var()
+    test "rearranges the state accordingly" do
+      # We have [1, 2, 3] as stack entries
+      LocalState.add_context(:context, 1, {self(), self(), :read})
+      LocalState.add_context(:context, 2, {self(), self(), :read})
+      LocalState.add_context(:context, 3, {self(), self(), :read})
+      assert [%{shard_id: 1}, %{shard_id: 2}, %{shard_id: 3}] = Stack.to_list(contexts())
 
-      # The context will only exist in `current_context` after calling `set_current_context/2`
+      # We'll set "1" as current context, meaning the Stack needs to change to [2, 3, 1]
       LocalState.set_current_context(:context, 1)
-      assert current_context_var() == {:context, 1}
+      assert [%{shard_id: 2}, %{shard_id: 3}, %{shard_id: 1}] = Stack.to_list(contexts())
+
+      # Now "3" is set as current context, meaning the stack should now be [2, 1, 3]
+      LocalState.set_current_context(:context, 3)
+      assert [%{shard_id: 2}, %{shard_id: 1}, %{shard_id: 3}] = Stack.to_list(contexts())
     end
 
     test "raises when setting a context that doesn't exist in the state" do
@@ -128,19 +140,35 @@ defmodule Feeb.DB.LocalStateTest do
     end
   end
 
-  describe "unset_current_context/0" do
-    test "unsets the Process state" do
+  describe "remove_current_context/0" do
+    test "deletes the Process state" do
       # There is something set as current context
-      LocalState.add_entry(:context, 1, {self(), self(), :read})
-      LocalState.set_current_context(:context, 1)
-      assert current_context_var()
+      LocalState.add_context(:context, 1, {self(), self(), :read})
+      refute Stack.empty?(contexts())
 
       # Once unset, nothing else is defined in the context var
-      LocalState.unset_current_context()
-      refute current_context_var()
+      LocalState.remove_current_context()
+      assert Stack.empty?(contexts())
     end
   end
 
-  defp current_context_var, do: Process.get(:feebdb_current_context)
-  defp state_var, do: Process.get(:feebdb_state)
+  describe "count_open_contexts/0" do
+    test "returns the expected number of contexts" do
+      assert 0 == LocalState.count_open_contexts()
+
+      LocalState.add_context(:context, 1, {self(), self(), :read})
+      assert 1 == LocalState.count_open_contexts()
+
+      LocalState.add_context(:context, 2, {self(), self(), :read})
+      assert 2 == LocalState.count_open_contexts()
+
+      LocalState.remove_current_context()
+      assert 1 == LocalState.count_open_contexts()
+
+      LocalState.remove_current_context()
+      assert 0 == LocalState.count_open_contexts()
+    end
+  end
+
+  defp contexts, do: Process.get(:feebdb_contexts)
 end

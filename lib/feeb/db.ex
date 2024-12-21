@@ -25,7 +25,6 @@ defmodule Feeb.DB do
     transaction_type = opts[:type] || :exclusive
 
     setup_env(context, shard_id, access_type, opts)
-    set_context(context, shard_id)
 
     # We can't BEGIN EXCLUSIVE in a read-only database
     txn_type = if(access_type == :read, do: :deferred, else: transaction_type)
@@ -47,21 +46,9 @@ defmodule Feeb.DB do
   Allow `callback` to switch context but resume previous context when `callback` finishes executing.
   """
   def with_context(callback) when is_function(callback) do
-    current_ctx = LocalState.get_current_context!()
+    current_ctx = LocalState.get_current_context()
     result = callback.()
-    LocalState.set_current_context(current_ctx.context, current_ctx.shard_id)
-    result
-  end
-
-  @doc """
-  Same as `with_context/1`, but explicitly sets the "temporary" context. You will want to use this
-  function when resuming to a transaction that has already begun.
-  """
-  def with_context(context, shard_id, callback) when is_function(callback) do
-    current_ctx = LocalState.get_current_context!()
-    LocalState.set_current_context(context, shard_id)
-    result = callback.()
-    LocalState.set_current_context(current_ctx.context, current_ctx.shard_id)
+    current_ctx && LocalState.set_current_context(current_ctx.context, current_ctx.shard_id)
     result
   end
 
@@ -262,14 +249,14 @@ defmodule Feeb.DB do
     {:ok, manager_pid} = Repo.Manager.Registry.fetch_or_create(context, shard_id)
     {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type, opts)
 
-    LocalState.add_entry(context, shard_id, {manager_pid, repo_pid, type})
+    LocalState.add_context(context, shard_id, {manager_pid, repo_pid, type})
   end
 
   defp delete_env do
     state = LocalState.get_current_context!()
     :ok = Repo.Manager.release_connection(state.manager_pid, state.repo_pid)
-    LocalState.remove_entry(state.context, state.shard_id)
-    LocalState.unset_current_context()
+
+    LocalState.remove_current_context()
   end
 
   defp get_pid! do
