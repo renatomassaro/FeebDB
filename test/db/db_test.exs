@@ -1,5 +1,6 @@
 defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
+  alias Utils.Stack
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
   alias Sample.{AllTypes, CustomTypes, Friend, Post}
@@ -122,10 +123,23 @@ defmodule Feeb.DBTest do
       DB.begin(:test, test_shard_2, :write)
       DB.begin(:raw, raw_shard_1, :write)
 
-      local_state = Process.get(:feebdb_state)
-      assert {_, test_entry_1} = Enum.find(local_state, fn {k, _} -> k == {:test, test_shard_1} end)
-      assert {_, test_entry_2} = Enum.find(local_state, fn {k, _} -> k == {:test, test_shard_2} end)
-      assert {_, raw_entry_1} = Enum.find(local_state, fn {k, _} -> k == {:raw, raw_shard_1} end)
+      # LocalState contexts were created accordingly
+      contexts = Process.get(:feebdb_contexts)
+
+      assert test_entry_1 =
+               Stack.find(contexts, fn state ->
+                 state.context == :test and state.shard_id == test_shard_1
+               end)
+
+      assert test_entry_2 =
+               Stack.find(contexts, fn state ->
+                 state.context == :test and state.shard_id == test_shard_2
+               end)
+
+      assert raw_entry_1 =
+               Stack.find(contexts, fn state ->
+                 state.context == :raw and state.shard_id == raw_shard_1
+               end)
 
       # Each entry has the correct context and shard ID
       assert test_entry_1.context == :test
@@ -140,6 +154,45 @@ defmodule Feeb.DBTest do
       refute test_entry_2.manager_pid == raw_entry_1.manager_pid
       refute test_entry_1.repo_pid == test_entry_2.repo_pid
       refute test_entry_2.repo_pid == raw_entry_1.repo_pid
+
+      # Each context is stacked on top of each other:
+      # We are currently at `raw_shard_1`:
+      assert %{context: :raw, shard_id: ^raw_shard_1} = LocalState.get_current_context()
+      DB.commit()
+
+      # After the outermost connection is committed, we get back to the second one
+      assert %{context: :test, shard_id: ^test_shard_2} = LocalState.get_current_context()
+      DB.commit()
+
+      # And now we are back to the first connection
+      assert %{context: :test, shard_id: ^test_shard_1} = LocalState.get_current_context()
+      DB.commit()
+
+      # Well, we can't commit a fourth time because there is no fourth context
+      assert %{message: error} =
+               assert_raise(RuntimeError, fn ->
+                 DB.commit()
+               end)
+
+      assert error =~ "Current context not set"
+    end
+
+    test "supports opening the same context and same shard under different access_types" do
+      {:ok, shard_id, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      DB.begin(:test, shard_id, :write)
+      DB.begin(:test, shard_id, :read)
+      DB.commit()
+      DB.commit()
+    end
+
+    test "supports opening the same context and same shard with same access_type" do
+      {:ok, shard_id, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      DB.begin(:test, shard_id, :read)
+      DB.begin(:test, shard_id, :read)
+      DB.commit()
+      DB.commit()
     end
   end
 
@@ -229,33 +282,34 @@ defmodule Feeb.DBTest do
       # We have the result from `{:test, shard_2}`
       assert result_from_callback.title == "Post On Shard 2"
     end
-  end
 
-  describe "with_context/3" do
-    test "sets the new context right after callback starts executing" do
-      {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
-      {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+    test "supports executing without external/outside transaction" do
+      {:ok, shard_id, _} = Test.Feeb.DB.Setup.new_test_db(:test)
 
-      # Initially, we are at `{:test, shard_1}`
-      DB.begin(:test, shard_1, :write)
-      assert LocalState.get_current_context!().shard_id == shard_1
+      # There is no context "outside" the `with_context` block
+      refute LocalState.has_current_context?()
 
-      # We have to start with `with_context/1` in order to BEGIN a transaction and set the context
       DB.with_context(fn ->
-        DB.begin(:test, shard_2, :write)
-      end)
-
-      # Outside the callback we are always at `shard_1`
-      assert LocalState.get_current_context!().shard_id == shard_1
-
-      DB.with_context(:test, shard_2, fn ->
-        # with_context/3 immediatelly changed the context to `shard_2`
-        assert LocalState.get_current_context!().shard_id == shard_2
+        # And yet we can start a "temporary" context just fine
+        DB.begin(:test, shard_id, :write)
+        assert LocalState.has_current_context?()
         DB.commit()
       end)
 
-      # Back to `shard_1`
-      assert LocalState.get_current_context!().shard_id == shard_1
+      # Still nothing outside the `with_context` block
+      refute LocalState.has_current_context?()
+    end
+
+    test "supports nested connections in the same shard" do
+      {:ok, shard_id, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      DB.begin(:test, shard_id, :read)
+
+      DB.with_context(fn ->
+        DB.begin(:test, shard_id, :read)
+        DB.commit()
+      end)
+
       DB.commit()
     end
   end
@@ -283,10 +337,6 @@ defmodule Feeb.DBTest do
         LocalState.get_current_context!()
       end
 
-      # More specifically, we can assert the state was removed from internal variables
-      refute Process.get(:feebdb_current_context)
-      assert Process.get(:feebdb_state) == %{}
-
       # Repo and Manager are still alive after the transaction
       assert Process.alive?(state.manager_pid)
       assert Process.alive?(state.repo_pid)
@@ -311,6 +361,41 @@ defmodule Feeb.DBTest do
       assert_raise RuntimeError, fn ->
         DB.commit()
       end
+    end
+  end
+
+  describe "rollback/0" do
+    test "undoes the changes", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{atom: :i_am_atom, integer: 50, map_keys_atom: %{foo: "bar"}}
+      |> AllTypes.creation_params()
+      |> AllTypes.new()
+      |> DB.insert()
+
+      DB.rollback()
+
+      # Nothing exists in the `AllTypes` table
+      DB.begin(@context, shard_id, :read)
+      assert [] == DB.all(AllTypes)
+    end
+
+    test "supports multiple contexts being rolled back in the same process" do
+      {:ok, shard_1, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+      {:ok, shard_2, _} = Test.Feeb.DB.Setup.new_test_db(:test)
+
+      DB.begin(:test, shard_1, :write)
+      DB.begin(:test, shard_2, :read)
+      DB.rollback()
+      DB.rollback()
+
+      # Fails if we try to rollback again
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          DB.rollback()
+        end
+
+      assert error =~ "Current context not set"
     end
   end
 
