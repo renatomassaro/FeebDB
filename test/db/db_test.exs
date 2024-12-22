@@ -1,6 +1,5 @@
 defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
-  alias Utils.Stack
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
   alias Sample.{AllTypes, CustomTypes, Friend, Post}
