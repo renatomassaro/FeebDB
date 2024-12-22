@@ -1,6 +1,5 @@
 defmodule Feeb.DB.LocalStateTest do
   use ExUnit.Case, async: true
-  alias Utils.Stack
   alias Feeb.DB.LocalState
 
   describe "add_context/3" do

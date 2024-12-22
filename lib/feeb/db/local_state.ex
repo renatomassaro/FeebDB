@@ -5,8 +5,6 @@ defmodule Feeb.DB.LocalState do
 
   require Logger
 
-  alias Utils.Stack
-
   # TODO: Most of these types should be defined at `Feeb.DB`
   @typep context :: atom()
   @typep shard_id :: integer()
