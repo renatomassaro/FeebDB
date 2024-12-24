@@ -2,6 +2,13 @@
 defmodule Utils.Map do
   def atomify_keys(map, opts \\ [])
 
+  def atomify_keys(struct, opts) when is_struct(struct) do
+    case Keyword.get(opts, :on_struct, :keep) do
+      :keep -> struct
+      :convert -> Map.from_struct(struct)
+    end
+  end
+
   def atomify_keys(map, opts) when is_map(map) do
     atomify_fun =
       if Keyword.get(opts, :with_existing_atom, false),
@@ -29,6 +36,9 @@ defmodule Utils.Map do
     do: atomify_keys(map, with_existing_atom: true)
 
   # DOCME
+  def stringify_keys(struct) when is_struct(struct),
+    do: struct |> Map.from_struct() |> stringify_keys()
+
   def stringify_keys(map) when is_map(map) do
     Enum.reduce(map, %{}, fn {k, v}, acc ->
       cond do
@@ -45,4 +55,39 @@ defmodule Utils.Map do
   end
 
   def stringify_keys(v), do: v
+
+  def load_structs(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn
+      {k, v}, acc when is_map(v) ->
+        new_v =
+          if Map.has_key?(v, :__struct__) or Map.has_key?(v, "__struct__") do
+            convert_to_struct(v[:__struct__] || v["__struct__"], v)
+          else
+            load_structs(v)
+          end
+
+        Map.put(acc, k, new_v)
+
+      {k, v}, acc ->
+        Map.put(acc, k, load_structs(v))
+    end)
+    |> maybe_convert_top_level_struct()
+  end
+
+  def load_structs(v), do: v
+
+  defp maybe_convert_top_level_struct(%{__struct__: struct_mod} = entries),
+    do: convert_to_struct(struct_mod, entries)
+
+  defp maybe_convert_top_level_struct(%{"__struct__" => struct_mod} = entries),
+    do: convert_to_struct(struct_mod, entries)
+
+  defp maybe_convert_top_level_struct(map),
+    do: map
+
+  defp convert_to_struct(raw_struct_mod, entries) when is_binary(raw_struct_mod),
+    do: convert_to_struct(String.to_existing_atom(raw_struct_mod), safe_atomify_keys(entries))
+
+  defp convert_to_struct(struct_mod, entries) when is_atom(struct_mod),
+    do: struct(struct_mod, entries)
 end

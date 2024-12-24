@@ -25,6 +25,33 @@ defmodule Feeb.DB.Type.MapTest do
                DB.raw!("select map, map_nullable from all_types")
     end
 
+    test "stores and loads structs inside maps", %{shard_id: shard_id} do
+      version = %Version{major: 4, minor: 2, patch: 0}
+      uri = URI.new!("foo")
+
+      map = %{uri: uri, version: version}
+      stringified_map = Utils.Map.stringify_keys(map)
+
+      params = AllTypes.creation_params(%{map: map, map_keys_atom: map})
+
+      # Structs are parsed correctly
+      all_types = AllTypes.new(params)
+      assert all_types.map == stringified_map
+      assert all_types.map_keys_atom == map
+
+      DB.begin(@context, shard_id, :write)
+      assert {:ok, db_all_types} = DB.insert(all_types)
+      assert db_all_types.map == stringified_map
+      assert db_all_types.map_keys_atom == map
+
+      # Structs are stored next to the map, under the __struct__ key
+      assert [[raw_map, raw_map_keys_atom]] = DB.raw!("select map, map_keys_atom from all_types")
+      assert raw_map_keys_atom =~ "\"__struct__\":\"Elixir.URI\""
+
+      # Except in the stringified (non-atom) map
+      refute raw_map =~ "\"__struct__\":\"Elixir.URI\""
+    end
+
     test "supports nullable", %{shard_id: shard_id} do
       params = AllTypes.creation_params(%{map_nullable: nil})
 
