@@ -7,7 +7,7 @@ defmodule Feeb.DB.Type.Map do
   def sqlite_type, do: :text
 
   @doc """
-  When casting, we need to guaranteed that the output follows the `keys` specified in the column
+  When casting, we need to guarantee that the output follows the `keys` specified in the column
   opts. For example, if a field has `keys: :atom` and receives %{"foo" => :bar} as value, we need to
   cast it to %{foo: :bar}.
   """
@@ -30,6 +30,7 @@ defmodule Feeb.DB.Type.Map do
       opts[:keys] == :safe_atom -> v |> JSON.decode!() |> Utils.Map.safe_atomify_keys()
       true -> JSON.decode!(v)
     end
+    |> load_structs(opts)
   end
 
   def load!(nil, %{nullable: true}, _), do: nil
@@ -38,4 +39,7 @@ defmodule Feeb.DB.Type.Map do
     Logger.warning("Loaded `nil` value from non-nullable field: #{field}@#{schema}")
     nil
   end
+
+  defp load_structs(map, %{load_structs: false}), do: map
+  defp load_structs(map, _), do: Utils.Map.load_structs(map)
 end
