@@ -10,6 +10,11 @@ defmodule Feeb.DB.Type.Map do
   When casting, we need to guarantee that the output follows the `keys` specified in the column
   opts. For example, if a field has `keys: :atom` and receives %{"foo" => :bar} as value, we need to
   cast it to %{foo: :bar}.
+
+  We *must* convert every key based on the `:keys` information set in `opts`; we cannot keep the
+  input as-is. Imagine someone passes an hybrid `%{a: :map, "with" => "strings"}` map with both
+  atoms and strings as keys. It's impossible to know which keys were atom and which ones were string
+  when we `load!/3` the data from disk, since this information is lost during `dump!/3`.
   """
   def cast!(v, opts, _) when is_map(v) do
     cond do
