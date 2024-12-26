@@ -4,7 +4,15 @@ defmodule Feeb.DB.Type.Map do
   require Logger
   alias Utils.JSON
 
+  @allowed_keys [:string, :atom, :safe_atom]
+
   def sqlite_type, do: :text
+
+  @doc """
+  Adds default `:keys` to the column `opts` if none is set. Default `:keys` value is `:atom`.
+  """
+  def overwrite_opts(%{keys: keys} = opts, _, _) when keys in @allowed_keys, do: opts
+  def overwrite_opts(opts, _, _), do: Map.put(opts, :keys, :atom)
 
   @doc """
   When casting, we need to guarantee that the output follows the `keys` specified in the column
@@ -18,9 +26,9 @@ defmodule Feeb.DB.Type.Map do
   """
   def cast!(v, opts, _) when is_map(v) do
     cond do
-      opts[:keys] == :atom -> Utils.Map.atomify_keys(v)
+      opts[:keys] == :string -> Utils.Map.stringify_keys(v)
       opts[:keys] == :safe_atom -> Utils.Map.safe_atomify_keys(v)
-      true -> Utils.Map.stringify_keys(v)
+      opts[:keys] == :atom -> Utils.Map.atomify_keys(v)
     end
   end
 
@@ -31,9 +39,9 @@ defmodule Feeb.DB.Type.Map do
 
   def load!(v, opts, _) when is_binary(v) do
     cond do
-      opts[:keys] == :atom -> v |> JSON.decode!() |> Utils.Map.atomify_keys()
+      opts[:keys] == :string -> JSON.decode!(v)
       opts[:keys] == :safe_atom -> v |> JSON.decode!() |> Utils.Map.safe_atomify_keys()
-      true -> JSON.decode!(v)
+      opts[:keys] == :atom -> v |> JSON.decode!() |> Utils.Map.atomify_keys()
     end
     |> load_structs(opts)
   end

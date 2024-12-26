@@ -508,7 +508,7 @@ defmodule Feeb.DBTest do
                DB.all({:all_types, :get_map}, [], format: :raw) |> Enum.sort()
 
       # With the :type flag, we return the values formatted by their types _without_ the full schema
-      assert [%{map: %{"girl" => ["so", "confusing"]}}, %{map: %{"foo" => "bar"}}] |> Enum.sort() ==
+      assert [%{map: %{girl: ["so", "confusing"]}}, %{map: %{foo: "bar"}}] |> Enum.sort() ==
                DB.all({:all_types, :get_map}, [], format: :type) |> Enum.sort()
 
       assert [%{atom: :i_am_atom, integer: 50}, %{atom: :other_atom, integer: -2}] |> Enum.sort() ==
