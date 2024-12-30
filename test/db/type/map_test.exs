@@ -89,6 +89,37 @@ defmodule Feeb.DB.Type.MapTest do
       assert db_all_types.map_keys_string == stringified_map
     end
 
+    test "stores and loads struct (struct inside struct)", %{shard_id: shard_id} do
+      # `v2` has `v1` within it (nested struct)
+      v1 = %Version{major: 1, minor: 0, patch: 0, build: nil, pre: []}
+      v2 = %Version{major: 2, minor: 0, patch: 0, build: v1, pre: []}
+
+      stringified_v1 = Utils.Map.stringify_keys(v1)
+      stringified_v2 = Utils.Map.stringify_keys(v2)
+
+      params =
+        AllTypes.creation_params(%{
+          map: v2,
+          map_keys_string: v2
+        })
+
+      all_types = AllTypes.new(params)
+
+      assert all_types.map == v2
+      assert all_types.map.build == v1
+      assert all_types.map_keys_string == stringified_v2
+      assert all_types.map_keys_string["build"] == stringified_v1
+
+      # We can store/load the struct in the database (when keys are atomified)
+      DB.begin(@context, shard_id, :write)
+      assert {:ok, db_all_types} = DB.insert(all_types)
+
+      assert db_all_types.map == v2
+      assert db_all_types.map.build == v1
+      assert db_all_types.map_keys_string == stringified_v2
+      assert db_all_types.map_keys_string["build"] == stringified_v1
+    end
+
     test "supports nullable", %{shard_id: shard_id} do
       params = AllTypes.creation_params(%{map_nullable: nil})
 

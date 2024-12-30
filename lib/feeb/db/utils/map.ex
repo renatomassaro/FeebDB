@@ -58,6 +58,9 @@ defmodule Utils.Map do
 
   def load_structs(map) when is_map(map) do
     Enum.reduce(map, %{}, fn
+      {k, v}, acc when is_struct(v) ->
+        Map.put(acc, k, v)
+
       {k, v}, acc when is_map(v) ->
         new_v =
           if Map.has_key?(v, :__struct__) or Map.has_key?(v, "__struct__") do
@@ -88,6 +91,8 @@ defmodule Utils.Map do
   defp convert_to_struct(raw_struct_mod, entries) when is_binary(raw_struct_mod),
     do: convert_to_struct(String.to_existing_atom(raw_struct_mod), safe_atomify_keys(entries))
 
-  defp convert_to_struct(struct_mod, entries) when is_atom(struct_mod),
-    do: struct(struct_mod, entries)
+  defp convert_to_struct(struct_mod, entries) when is_atom(struct_mod) do
+    entries = Map.drop(entries, [:__struct__, "__struct__"])
+    struct(struct_mod, load_structs(entries))
+  end
 end
