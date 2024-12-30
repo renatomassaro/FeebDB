@@ -58,36 +58,17 @@ defmodule Utils.Map do
 
   def load_structs(map) when is_map(map) do
     Enum.reduce(map, %{}, fn
-      {k, v}, acc when is_map(v) ->
-        new_v =
-          if Map.has_key?(v, :__struct__) or Map.has_key?(v, "__struct__") do
-            convert_to_struct(v[:__struct__] || v["__struct__"], v)
+      {k, v}, acc ->
+        {new_k, new_v} =
+          if k == :__struct__ or k == "__struct__" do
+            {:__struct__, String.to_existing_atom(v)}
           else
-            load_structs(v)
+            {k, load_structs(v)}
           end
 
-        Map.put(acc, k, new_v)
-
-      {k, v}, acc ->
-        Map.put(acc, k, load_structs(v))
+        Map.put(acc, new_k, new_v)
     end)
-    |> maybe_convert_top_level_struct()
   end
 
   def load_structs(v), do: v
-
-  defp maybe_convert_top_level_struct(%{__struct__: struct_mod} = entries),
-    do: convert_to_struct(struct_mod, entries)
-
-  defp maybe_convert_top_level_struct(%{"__struct__" => struct_mod} = entries),
-    do: convert_to_struct(struct_mod, entries)
-
-  defp maybe_convert_top_level_struct(map),
-    do: map
-
-  defp convert_to_struct(raw_struct_mod, entries) when is_binary(raw_struct_mod),
-    do: convert_to_struct(String.to_existing_atom(raw_struct_mod), safe_atomify_keys(entries))
-
-  defp convert_to_struct(struct_mod, entries) when is_atom(struct_mod),
-    do: struct(struct_mod, entries)
 end

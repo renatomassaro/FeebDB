@@ -20,6 +20,7 @@ CREATE TABLE all_types (
   datetime_utc_precision_microsecond TEXT,
   datetime_utc_precision_default TEXT,
   map TEXT,
+  map_load_structs TEXT,
   map_nullable TEXT,
   map_keys_atom TEXT,
   map_keys_safe_atom TEXT,
