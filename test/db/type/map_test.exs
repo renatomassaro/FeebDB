@@ -39,23 +39,39 @@ defmodule Feeb.DB.Type.MapTest do
       map = %{uri: uri, version: version}
       stringified_map = Utils.Map.stringify_keys(map)
 
-      params = AllTypes.creation_params(%{map: map, map_keys_string: map})
+      # By default, structs are *not* loaded (since loading may cause performance issues and isn't
+      # always desirable). When a struct is retrieved in a `load_structs: false` map, we'll simply
+      # return the :__struct__ key as is
+      map_with_structs_unloaded =
+        map
+        |> put_in([:uri, Access.key!(:__struct__)], "Elixir.URI")
+        |> put_in([:version, Access.key!(:__struct__)], "Elixir.Version")
+
+      params =
+        AllTypes.creation_params(%{
+          map: map,
+          map_load_structs: map,
+          map_keys_string: map
+        })
 
       # Structs are parsed correctly
       all_types = AllTypes.new(params)
       assert all_types.map == map
+      assert all_types.map_load_structs == map
       assert all_types.map_keys_string == stringified_map
 
       DB.begin(@context, shard_id, :write)
       assert {:ok, db_all_types} = DB.insert(all_types)
-      assert db_all_types.map == map
+      assert db_all_types.map == map_with_structs_unloaded
+      assert db_all_types.map_load_structs == map
       assert db_all_types.map_keys_string == stringified_map
 
       # Structs are stored next to the map, under the __struct__ key, except in the stringified map
-      assert [[raw_map, raw_map_keys_string]] =
-               DB.raw!("select map, map_keys_string from all_types")
+      assert [[raw_map, raw_map_load_structs, raw_map_keys_string]] =
+               DB.raw!("select map, map_load_structs, map_keys_string from all_types")
 
       assert raw_map =~ "\"__struct__\":\"Elixir.URI\""
+      assert raw_map_load_structs =~ "\"__struct__\":\"Elixir.URI\""
       refute raw_map_keys_string =~ "\"__struct__\":\"Elixir.URI\""
     end
 
@@ -65,6 +81,7 @@ defmodule Feeb.DB.Type.MapTest do
       params =
         AllTypes.creation_params(%{
           map: version,
+          map_load_structs: version,
           map_keys_string: version,
           map_keys_safe_atom: version
         })
@@ -78,14 +95,16 @@ defmodule Feeb.DB.Type.MapTest do
       # entirely and instead we end up with the raw map with stringified keys
       all_types = AllTypes.new(params)
       assert all_types.map == version
+      assert all_types.map_load_structs == version
       assert all_types.map_keys_safe_atom == version
       assert all_types.map_keys_string == stringified_map
 
       # We can store/load the struct in the database (when keys is atom or safe_atom)
       DB.begin(@context, shard_id, :write)
       assert {:ok, db_all_types} = DB.insert(all_types)
-      assert db_all_types.map == version
-      assert db_all_types.map_keys_safe_atom == version
+      assert db_all_types.map == Map.put(version, :__struct__, "Elixir.Version")
+      assert db_all_types.map_load_structs == version
+      assert db_all_types.map_keys_safe_atom == Map.put(version, :__struct__, "Elixir.Version")
       assert db_all_types.map_keys_string == stringified_map
     end
 
@@ -100,13 +119,16 @@ defmodule Feeb.DB.Type.MapTest do
       params =
         AllTypes.creation_params(%{
           map: v2,
+          map_load_structs: v2,
           map_keys_string: v2
         })
 
       all_types = AllTypes.new(params)
 
+      # `map` will keep the struct as-is because it hasn't been serialized to/from JSON yet
       assert all_types.map == v2
-      assert all_types.map.build == v1
+      assert all_types.map_load_structs == v2
+      assert all_types.map_load_structs.build == v1
       assert all_types.map_keys_string == stringified_v2
       assert all_types.map_keys_string["build"] == stringified_v1
 
@@ -114,8 +136,12 @@ defmodule Feeb.DB.Type.MapTest do
       DB.begin(@context, shard_id, :write)
       assert {:ok, db_all_types} = DB.insert(all_types)
 
-      assert db_all_types.map == v2
-      assert db_all_types.map.build == v1
+      # After loaded, `map` will return the "naive" map whereas `%{load_structs: true}` will iterate
+      # over each value in the map and convert any structs it finds along the way
+      assert db_all_types.map.__struct__ == "Elixir.Version"
+      assert db_all_types.map.build == Map.put(v1, :__struct__, "Elixir.Version")
+      assert db_all_types.map_load_structs == v2
+      assert db_all_types.map_load_structs.build == v1
       assert db_all_types.map_keys_string == stringified_v2
       assert db_all_types.map_keys_string["build"] == stringified_v1
     end

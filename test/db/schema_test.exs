@@ -49,6 +49,7 @@ defmodule DB.SchemaTest do
                :datetime_utc_precision_microsecond,
                :datetime_utc_precision_default,
                :map,
+               :map_load_structs,
                :map_nullable,
                :map_keys_atom,
                :map_keys_safe_atom,

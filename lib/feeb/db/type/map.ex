@@ -53,6 +53,6 @@ defmodule Feeb.DB.Type.Map do
     nil
   end
 
-  defp load_structs(map, %{load_structs: false}), do: map
-  defp load_structs(map, _), do: Utils.Map.load_structs(map)
+  defp load_structs(map, %{load_structs: true}), do: Utils.Map.load_structs(map)
+  defp load_structs(map, _), do: map
 end

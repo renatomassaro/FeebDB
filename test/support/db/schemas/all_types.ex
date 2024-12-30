@@ -23,6 +23,7 @@ defmodule Sample.AllTypes do
     {:datetime_utc_precision_microsecond, {:datetime_utc, precision: :microsecond, nullable: true}},
     {:datetime_utc_precision_default, {:datetime_utc, nullable: true}},
     {:map, :map},
+    {:map_load_structs, {:map, load_structs: true, nullable: true}},
     {:map_nullable, {:map, nullable: true}},
     {:map_keys_atom, {:map, keys: :atom, nullable: true}},
     {:map_keys_safe_atom, {:map, keys: :safe_atom, nullable: true}},
