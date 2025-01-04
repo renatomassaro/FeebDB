@@ -311,7 +311,7 @@ defmodule Feeb.DB.Schema do
     |> struct(values)
     |> Map.put(:__meta__, %{origin: :db})
     |> add_missing_values(table_fields, fields_to_populate)
-    |> add_virtual_fields(virtual_fields, schema)
+    |> add_virtual_fields(virtual_fields)
     |> trigger_after_read_callbacks(after_read_fields)
   end
 
@@ -377,25 +377,20 @@ defmodule Feeb.DB.Schema do
     Kernel.struct(struct, values)
   end
 
-  defp add_virtual_fields(struct, [], _), do: struct
-
-  defp add_virtual_fields(struct, virtual_fields, schema) do
-    repo_config = Process.get(:repo_config)
-
+  defp add_virtual_fields(struct, virtual_fields) do
     Enum.reduce(virtual_fields, struct, fn field_name, acc ->
-      {_, %{virtual: virtual_fn}, _} = Map.fetch!(schema, field_name)
-
-      value = apply(struct.__struct__, virtual_fn, [struct, repo_config])
-      Map.put(acc, field_name, value)
+      Map.put(acc, field_name, nil)
     end)
   end
 
   defp trigger_after_read_callbacks(struct, []), do: struct
 
   defp trigger_after_read_callbacks(struct, after_read_fields) do
+    repo_config = Process.get(:repo_config)
+
     Enum.reduce(after_read_fields, struct, fn {field, callback}, acc ->
       old_value = Map.get(struct, field)
-      new_value = apply(struct.__struct__, callback, [old_value, struct])
+      new_value = apply(struct.__struct__, callback, [old_value, struct, repo_config])
       Map.put(acc, field, new_value)
     end)
   end

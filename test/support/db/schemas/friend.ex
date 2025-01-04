@@ -9,9 +9,9 @@ defmodule Sample.Friend do
   @schema [
     {:id, :integer},
     {:name, :string},
-    {:divorce_count, {:integer, virtual: :get_divorce_count}},
+    {:divorce_count, {:integer, virtual: true, after_read: :get_divorce_count}},
     {:sibling_count, {:integer, nullable: true, after_read: :get_sibling_count}},
-    {:repo_config, {:map, virtual: :get_repo_config}}
+    {:repo_config, {:map, virtual: true, after_read: :get_repo_config}}
   ]
 
   def new(params) do
@@ -20,10 +20,10 @@ defmodule Sample.Friend do
     |> Schema.create()
   end
 
-  def get_repo_config(_row, %DB.Repo.RepoConfig{} = repo_config),
+  def get_repo_config(_field, _row, %DB.Repo.RepoConfig{} = repo_config),
     do: repo_config
 
-  def get_divorce_count(%{name: name}, _) do
+  def get_divorce_count(_, %{name: name}, _) do
     case name do
       "Ross" ->
         3
@@ -40,7 +40,7 @@ defmodule Sample.Friend do
     end
   end
 
-  def get_sibling_count(_, %{name: name}) do
+  def get_sibling_count(_, %{name: name}, _) do
     case name do
       "Joey" ->
         7

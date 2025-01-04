@@ -33,7 +33,9 @@ defmodule Sample.AllTypes do
     {:list_nullable, {:list, nullable: true}},
     {:enum, {:enum, values: [:one, :two, :three]}},
     {:enum_nullable, {:enum, values: ["foo", "bar", "baz"], nullable: true}},
-    {:enum_safe_atom, {:enum, values: [:safe, :atom], format: :safe_atom, nullable: true}}
+    {:enum_safe_atom, {:enum, values: [:safe, :atom], format: :safe_atom, nullable: true}},
+    {:virtual, {:integer, virtual: true}},
+    {:virtual_with_after_read, {:integer, virtual: true, after_read: :load_virtual_integer}}
   ]
 
   def new(params) do
@@ -56,4 +58,6 @@ defmodule Sample.AllTypes do
     }
     |> Map.merge(overwrites)
   end
+
+  def load_virtual_integer(_field, row, _repo_config), do: row.integer
 end
