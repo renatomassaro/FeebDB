@@ -67,7 +67,7 @@ defmodule DB.SchemaTest do
   describe "generated: __virtual_cols__/0" do
     test "includes all virtual fields" do
       assert [:divorce_count, :repo_config] == Friend.__virtual_cols__() |> Enum.sort()
-      assert [] == AllTypes.__virtual_cols__()
+      assert [:virtual, :virtual_with_after_read] == AllTypes.__virtual_cols__() |> Enum.sort()
     end
   end
 
@@ -97,6 +97,27 @@ defmodule DB.SchemaTest do
   end
 
   describe "virtual fields" do
+    test "virtual fields hold the `nil` value by default", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      all_types =
+        %{integer: 666}
+        |> AllTypes.creation_params()
+        |> AllTypes.new()
+
+      # Both `virtual` and `virtual_with_after_read` are `nil`. This is the default and nothing has
+      # been read so far
+      assert nil == all_types.virtual
+      assert nil == all_types.virtual_with_after_read
+
+      # After read, we do have a value for `virtual_with_after_read`, but the rest remains intact
+      assert {:ok, db_all_types} = DB.insert(all_types)
+      assert nil == db_all_types.virtual
+      assert 666 == db_all_types.virtual_with_after_read
+
+      assert [db_all_types] == DB.all(AllTypes)
+    end
+
     test "virtual fields are computed and added to the result", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :read)
 
@@ -122,6 +143,19 @@ defmodule DB.SchemaTest do
       assert phoebe.repo_config == expected_repo_config
       assert rachel.repo_config == expected_repo_config
       assert monica.repo_config == expected_repo_config
+    end
+
+    test "virtual fields are completely ignored when inserting data", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # Mike had a divorce before marrying Phoebe
+      mike = Friend.new(%{id: 7, name: "Mike", divorce_count: 1})
+      assert mike.divorce_count == 1
+
+      # The virtual field `divorce_count` played no role in the insert. When the row was read, we
+      # resort to the `after_read` logic (defined at `Sample.Friend.get_divorce_count/3`)
+      assert {:ok, db_mike} = DB.insert(mike)
+      assert db_mike.divorce_count == 0
     end
   end
 
