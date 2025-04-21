@@ -256,6 +256,21 @@ defmodule Feeb.DB do
     r
   end
 
+  def delete_all(partial_or_full_query_id, bindings, opts \\ [])
+
+  def delete_all({domain, query_name}, bindings, opts) do
+    delete_all({get_context!(), domain, query_name}, bindings, opts)
+  end
+
+  def delete_all({_, domain, query_name}, bindings, opts) do
+    GenServer.call(get_pid!(), {:query, :delete_all, {domain, query_name}, bindings, opts})
+  end
+
+  def delete_all!(query_id, params, opts \\ []) do
+    {:ok, r} = delete_all(query_id, params, opts)
+    r
+  end
+
   ##################################################################################################
   # Private
   ##################################################################################################

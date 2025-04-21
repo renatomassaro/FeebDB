@@ -569,4 +569,37 @@ defmodule Feeb.DBTest do
       assert nil == DB.update_all!({:posts, :publish_posts_by_title}, ["No matches"])
     end
   end
+
+  describe "delete_all/3" do
+    test "performs the SQL-based delete", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 2, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 3, title: "Not a draft", body: "My Body", is_draft: false}
+      |> Post.new()
+      |> DB.insert!()
+
+      # Initially there are 3 posts
+      assert [_, _, _] = DB.all(Post)
+
+      assert {:ok, nil} == DB.delete_all({:posts, :delete_all_drafts}, [])
+
+      # Now there's only one (the non-draft one)
+      assert [_] = DB.all(Post)
+    end
+  end
+
+  describe "delete_all!/3" do
+    test "performs the SQL-based delete", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      assert nil == DB.update_all!({:posts, :delete_all_drafts}, [])
+    end
+  end
 end
