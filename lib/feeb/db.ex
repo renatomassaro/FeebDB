@@ -210,6 +210,21 @@ defmodule Feeb.DB do
     r
   end
 
+  def update_all(partial_or_full_query_id, bindings, opts \\ [])
+
+  def update_all({domain, query_name}, bindings, opts) do
+    update_all({get_context!(), domain, query_name}, bindings, opts)
+  end
+
+  def update_all({_, domain, query_name}, bindings, opts) do
+    GenServer.call(get_pid!(), {:query, :update_all, {domain, query_name}, bindings, opts})
+  end
+
+  def update_all!(query_id, params, opts \\ []) do
+    {:ok, r} = update_all(query_id, params, opts)
+    r
+  end
+
   # TODO: Test
   def delete(%schema{} = struct) do
     {get_context!(), schema.__table__(), :__delete}

@@ -9,6 +9,7 @@ defmodule Sample.Post do
     {:id, :integer},
     {:title, :string},
     {:body, :string},
+    {:is_draft, {:boolean, nullable: true}},
     {:inserted_at, {:datetime_utc, [precision: :millisecond], mod: :inserted_at}},
     {:updated_at, {:datetime_utc, [precision: :millisecond], mod: :updated_at}}
   ]

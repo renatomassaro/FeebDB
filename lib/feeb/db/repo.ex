@@ -319,6 +319,11 @@ defmodule Feeb.DB.Repo do
     {:ok, nil}
   end
 
+  defp format_result(:update_all, _, _, [], _, _) do
+    # PS: If RETURNING, I need to differentiate between [] (no rows updated) or [] (no RETURNING)
+    {:ok, nil}
+  end
+
   defp format_result(:delete, _, _, [], _bindings, _), do: {:ok, []}
 
   defp create_schema_from_rows({_, :pragma, _}, _, rows), do: rows

@@ -515,4 +515,58 @@ defmodule Feeb.DBTest do
                DB.all({:all_types, :get_atom_and_integer}, [], format: :type) |> Enum.sort()
     end
   end
+
+  describe "update/1" do
+    test "updates the struct", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post =
+        %{id: 1, title: "My Post", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      new_post = Post.change_title(post, "Other title")
+
+      # NOTE: Updates with `RETURNING` are TODO
+      assert {:ok, _} = DB.update(new_post)
+
+      # The value has changed in the DB
+      assert [post_in_db] = DB.all(Post, [1])
+      assert post_in_db.title == "Other title"
+    end
+  end
+
+  describe "update_all/3" do
+    test "performs the SQL-based update", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 2, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      # Both posts are flagged as draft
+      assert [post_1, post_2] = DB.all(Post)
+      assert post_1.is_draft
+      assert post_2.is_draft
+
+      # We'll mark both posts as non-draft
+      assert {:ok, nil} == DB.update_all({:posts, :publish_posts_by_title}, ["Post"])
+
+      # Now both posts are published
+      assert [post_1, post_2] = DB.all(Post)
+      refute post_1.is_draft
+      refute post_2.is_draft
+    end
+  end
+
+  describe "update_all!/3" do
+    test "performs the SQL-based update", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      assert nil == DB.update_all!({:posts, :publish_posts_by_title}, ["No matches"])
+    end
+  end
 end
