@@ -20,6 +20,11 @@ defmodule Sample.Friend do
     |> Schema.create()
   end
 
+  def update(%_{} = row, changes) do
+    row
+    |> Schema.update(changes)
+  end
+
   def get_repo_config(_field, _row, %DB.Repo.RepoConfig{} = repo_config),
     do: repo_config
 

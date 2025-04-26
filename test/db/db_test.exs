@@ -515,4 +515,203 @@ defmodule Feeb.DBTest do
                DB.all({:all_types, :get_atom_and_integer}, [], format: :type) |> Enum.sort()
     end
   end
+
+  describe "insert/1" do
+    test "inserts the struct (without RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert {:ok, friend} =
+               %{id: 7, name: "Mike"}
+               |> Friend.new()
+               |> DB.insert()
+
+      assert friend.name == "Mike"
+      assert friend.divorce_count == 0
+    end
+
+    test "inserts the struct (with RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert {:ok, friend} =
+               %{id: 7, name: "Mike"}
+               |> Friend.new()
+               |> DB.insert(returning: true)
+
+      assert friend.name == "Mike"
+      assert friend.divorce_count == 0
+    end
+  end
+
+  describe "update/1" do
+    test "updates the struct", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post =
+        %{id: 1, title: "My Post", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      assert {:ok, new_post} =
+               post
+               |> Post.change_title("Other title")
+               |> DB.update()
+
+      assert new_post.title == "Other title"
+      refute post.updated_at == new_post.updated_at
+    end
+
+    test "update attempt that failed to find a matching entry", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      # Before updating, we'll delete this entry
+      assert DB.delete!(friend)
+
+      # Now let's try updating it
+      assert {:error, :not_found} =
+               friend
+               |> Friend.update(%{name: "Mr Heckles"})
+               |> DB.update()
+    end
+  end
+
+  describe "update_all/3" do
+    test "performs the SQL-based update (without RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 2, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      # Both posts are flagged as draft
+      assert [post_1, post_2] = DB.all(Post)
+      assert post_1.is_draft
+      assert post_2.is_draft
+
+      # We'll mark both posts as non-draft
+      assert {:ok, nil} == DB.update_all({:posts, :publish_posts_by_title}, ["Post"])
+
+      # Now both posts are published
+      assert [post_1, post_2] = DB.all(Post)
+      refute post_1.is_draft
+      refute post_2.is_draft
+    end
+
+    test "performs the SQL-based update (with RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 2, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      assert {:ok, 2} == DB.update_all({:posts, :publish_posts_by_title}, ["Post"], returning: true)
+    end
+  end
+
+  describe "update_all!/3" do
+    test "performs the SQL-based update", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # There are no posts initially, so this will not match any results
+      assert nil == DB.update_all!({:posts, :publish_posts_by_title}, ["No matches"])
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      # Publishes all posts whose title is "Post"
+      assert nil == DB.update_all!({:posts, :publish_posts_by_title}, ["Post"])
+      assert [%{is_draft: false}] = DB.all(Post)
+    end
+  end
+
+  describe "delete/1" do
+    test "deletes the struct", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      assert {:ok, friend} == DB.delete(friend)
+
+      # Can't find that Friend anymore
+      refute DB.one({:friends, :get_by_id}, [1])
+    end
+
+    test "deletes the struct (without RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      assert {:ok, nil} == DB.delete(friend, returning: false)
+
+      # Can't find that Friend anymore
+      refute DB.one({:friends, :get_by_id}, [1])
+    end
+
+    test "delete attempt that failed to find a matching entry", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      # The first operation succeeds
+      assert {:ok, friend} == DB.delete(friend)
+
+      # The second operation returns an error tuple
+      assert {:error, :not_found} == DB.delete(friend)
+    end
+  end
+
+  describe "delete_all/3" do
+    test "performs the SQL-based delete", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 2, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 3, title: "Not a draft", body: "My Body", is_draft: false}
+      |> Post.new()
+      |> DB.insert!()
+
+      # Initially there are 3 posts
+      assert [_, _, _] = DB.all(Post)
+
+      assert {:ok, nil} == DB.delete_all({:posts, :delete_all_drafts}, [])
+
+      # Now there's only one (the non-draft one)
+      assert [_] = DB.all(Post)
+    end
+  end
+
+  describe "delete_all!/3" do
+    test "performs the SQL-based delete", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # There are no posts initially, so this will match no results
+      assert nil == DB.delete_all!({:posts, :delete_all_drafts}, [])
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      # Now we have 1 post (a draft)
+      assert [_] = DB.all(Post)
+
+      # Delete all drafts
+      assert nil == DB.delete_all!({:posts, :delete_all_drafts}, [])
+
+      # No more posts
+      assert [] = DB.all(Post)
+    end
+  end
 end

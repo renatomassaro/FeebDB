@@ -3,6 +3,7 @@ defmodule Feeb.DB.Query do
   alias __MODULE__.Binding
 
   @initial_q {"", {[], []}, nil}
+  @returning_re ~r/\sreturning\s/i
 
   def compile(path, {context, domain}) do
     Process.put({:db_sql, :path}, path)
@@ -156,7 +157,7 @@ defmodule Feeb.DB.Query do
   end
 
   defp compile_templated_query(:__delete, {_, domain, _} = query_id, _target_fields) do
-    sql = "DELETE FROM #{domain} WHERE id = ?"
+    sql = "DELETE FROM #{domain} WHERE id = ?;"
     adhoc_query = {sql, {[], [:id]}, :delete}
     append_runtime_query(query_id, adhoc_query)
     query_id
@@ -171,22 +172,25 @@ defmodule Feeb.DB.Query do
     :persistent_term.put({:db_sql_queries, {context, domain}}, new_adhoc_queries)
   end
 
-  # TODO
-  def fetch!({:pragma, :user_version}), do: {"PRAGMA user_version", [], nil}
-  def fetch!({:pragma, :set_user_version}), do: {"PRAGMA user_version = ?", [], nil}
-  def fetch!({:begin, :deferred}), do: {"BEGIN DEFERRED", [], nil}
-  def fetch!({:begin, :concurrent}), do: {"BEGIN CONCURRENT", [], nil}
-  def fetch!({:begin, :exclusive}), do: {"BEGIN EXCLUSIVE", [], nil}
-  def fetch!({_, :pragma, name}), do: fetch!({:pragma, name})
+  def fetch!(query_id, opts \\ [])
 
-  def fetch!({context, domain, name}) do
+  def fetch!({:pragma, :user_version}, _), do: {"PRAGMA user_version", [], nil}
+  def fetch!({:pragma, :set_user_version}, _), do: {"PRAGMA user_version = ?", [], nil}
+  def fetch!({:begin, :deferred}, _), do: {"BEGIN DEFERRED", [], nil}
+  def fetch!({:begin, :concurrent}, _), do: {"BEGIN CONCURRENT", [], nil}
+  def fetch!({:begin, :exclusive}, _), do: {"BEGIN EXCLUSIVE", [], nil}
+  def fetch!({_, :pragma, name}, _), do: fetch!({:pragma, name})
+
+  def fetch!({context, domain, name}, opts) do
     fetch_all!({context, domain})
     |> Map.fetch!(name)
+    |> maybe_inject_returning_clause(opts)
   end
 
-  def get({context, domain, name}) do
+  def get({context, domain, name}, opts \\ []) do
     fetch_all!({context, domain})
     |> Map.get(name)
+    |> maybe_inject_returning_clause(opts)
   end
 
   def fetch_all!({context, domain}) do
@@ -209,6 +213,27 @@ defmodule Feeb.DB.Query do
       raw_query
     end
   end
+
+  defp maybe_inject_returning_clause(nil, _), do: nil
+  defp maybe_inject_returning_clause(query, []), do: query
+
+  defp maybe_inject_returning_clause({sql, bindings, query_type} = query, opts) do
+    with true <- opts[:returning],
+         true <- query_type in [:insert, :update, :delete],
+         false <- Regex.match?(@returning_re, sql) do
+      new_sql = String.replace(sql, ";", " RETURNING #{get_returning_fields(query)};")
+      {new_sql, bindings, query_type}
+    else
+      _ ->
+        query
+    end
+  end
+
+  defp get_returning_fields({_, {_, params}, :insert}),
+    do: Enum.join(params, ", ")
+
+  defp get_returning_fields({_, _, operation}) when operation in [:update, :delete],
+    do: "*"
 
   # Line-break
   defp handle_line(<<>>, qs, id, q) when not is_nil(id) do

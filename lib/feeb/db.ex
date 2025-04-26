@@ -145,19 +145,18 @@ defmodule Feeb.DB do
     end
   end
 
-  def insert(%schema{} = struct) do
+  def insert(%schema{} = struct, opts \\ []) do
     {get_context!(), schema.__table__(), :__insert}
     |> Query.get_templated_query_id(:all, %{schema: schema})
-    |> insert(struct, [])
+    |> insert_sql(struct, opts)
   end
 
-  def insert(partial_or_full_query_id, struct, opts \\ [])
-
-  def insert({domain, query_name}, %_{} = struct, opts) do
-    insert({get_context!(), domain, query_name}, struct, opts)
+  def insert!(struct) do
+    {:ok, r} = insert(struct)
+    r
   end
 
-  def insert({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
+  defp insert_sql({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
     # TODO: Make it more friendly
     true = :application == struct.__meta__.origin
 
@@ -169,35 +168,10 @@ defmodule Feeb.DB do
     end
   end
 
-  def insert!(struct) do
-    {:ok, r} = insert(struct)
-    r
-  end
-
-  def insert!(query, struct, opts \\ []) do
-    {:ok, r} = insert(query, struct, opts)
-    r
-  end
-
-  # TODO Test
-  def update(%schema{} = struct) do
+  def update(%schema{} = struct, opts \\ []) do
     {get_context!(), schema.__table__(), :__update}
     |> Query.get_templated_query_id(struct.__meta__.target, %{})
-    |> update(struct, [])
-  end
-
-  def update(partial_or_full_query_id, struct, opts \\ [])
-
-  def update({domain, query_name}, %_{} = struct, opts) do
-    update({get_context!(), domain, query_name}, struct, opts)
-  end
-
-  def update({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
-    # TODO: Make it more friendly
-    true = :db == struct.__meta__.origin
-
-    bindings = get_bindings(full_query_id, struct)
-    GenServer.call(get_pid!(), {:query, :update, {domain, query_name}, bindings, opts})
+    |> update_sql(struct, Keyword.merge(opts, returning: true))
   end
 
   def update!(struct) do
@@ -205,30 +179,33 @@ defmodule Feeb.DB do
     r
   end
 
-  def update!(query_id, struct, opts \\ []) do
-    {:ok, r} = update(query_id, struct, opts)
-    r
-  end
-
-  # TODO: Test
-  def delete(%schema{} = struct) do
-    {get_context!(), schema.__table__(), :__delete}
-    |> Query.get_templated_query_id([], %{})
-    |> update(struct, [])
-  end
-
-  def delete(partial_or_full_query_id, struct, opts \\ [])
-
-  def delete({domain, query_name}, %_{} = struct, opts) do
-    delete({get_context!(), domain, query_name}, struct, opts)
-  end
-
-  def delete({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
+  defp update_sql({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
     # TODO: Make it more friendly
     true = :db == struct.__meta__.origin
 
     bindings = get_bindings(full_query_id, struct)
-    GenServer.call(get_pid!(), {:query, :delete, {domain, query_name}, bindings, opts})
+    GenServer.call(get_pid!(), {:query, :update, {domain, query_name}, bindings, opts})
+  end
+
+  def update_all(partial_or_full_query_id, bindings, opts \\ [])
+
+  def update_all({domain, query_name}, bindings, opts) do
+    update_all({get_context!(), domain, query_name}, bindings, opts)
+  end
+
+  def update_all({_, domain, query_name}, bindings, opts) do
+    GenServer.call(get_pid!(), {:query, :update_all, {domain, query_name}, bindings, opts})
+  end
+
+  def update_all!(query_id, params, opts \\ []) do
+    {:ok, r} = update_all(query_id, params, opts)
+    r
+  end
+
+  def delete(%schema{} = struct, opts \\ []) do
+    {get_context!(), schema.__table__(), :__delete}
+    |> Query.get_templated_query_id([], %{})
+    |> delete_sql(struct, Keyword.merge([returning: true], opts))
   end
 
   def delete!(struct) do
@@ -236,8 +213,26 @@ defmodule Feeb.DB do
     r
   end
 
-  def delete!(query_id, struct, opts \\ []) do
-    {:ok, r} = delete(query_id, struct, opts)
+  defp delete_sql({_, domain, query_name} = full_query_id, %_{} = struct, opts) do
+    # TODO: Make it more friendly
+    true = :db == struct.__meta__.origin
+
+    bindings = get_bindings(full_query_id, struct)
+    GenServer.call(get_pid!(), {:query, :delete, {domain, query_name}, bindings, opts})
+  end
+
+  def delete_all(partial_or_full_query_id, bindings, opts \\ [])
+
+  def delete_all({domain, query_name}, bindings, opts) do
+    delete_all({get_context!(), domain, query_name}, bindings, opts)
+  end
+
+  def delete_all({_, domain, query_name}, bindings, opts) do
+    GenServer.call(get_pid!(), {:query, :delete_all, {domain, query_name}, bindings, opts})
+  end
+
+  def delete_all!(query_id, params, opts \\ []) do
+    {:ok, r} = delete_all(query_id, params, opts)
     r
   end
 

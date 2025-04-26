@@ -84,7 +84,7 @@ defmodule DB.SchemaTest do
       DB.begin(@context, shard_id, :write)
 
       friend = Friend.new(%{id: 7, name: "Mike"})
-      assert {:ok, inserted_friend} = DB.insert({:friends, :insert}, friend)
+      assert {:ok, inserted_friend} = DB.insert(friend)
 
       # The data was inserted correctly
       assert inserted_friend.id == friend.id
