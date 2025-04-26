@@ -10,8 +10,8 @@ defmodule Sample.Post do
     {:title, :string},
     {:body, :string},
     {:is_draft, {:boolean, nullable: true}},
-    {:inserted_at, {:datetime_utc, [precision: :millisecond], mod: :inserted_at}},
-    {:updated_at, {:datetime_utc, [precision: :millisecond], mod: :updated_at}}
+    {:inserted_at, {:datetime_utc, [], mod: :inserted_at}},
+    {:updated_at, {:datetime_utc, [], mod: :updated_at}}
   ]
 
   def new(params) do

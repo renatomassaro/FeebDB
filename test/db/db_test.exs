@@ -516,6 +516,32 @@ defmodule Feeb.DBTest do
     end
   end
 
+  describe "insert/1" do
+    test "inserts the struct (without RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert {:ok, friend} =
+               %{id: 7, name: "Mike"}
+               |> Friend.new()
+               |> DB.insert()
+
+      assert friend.name == "Mike"
+      assert friend.divorce_count == 0
+    end
+
+    test "inserts the struct (with RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert {:ok, friend} =
+               %{id: 7, name: "Mike"}
+               |> Friend.new()
+               |> DB.insert(returning: true)
+
+      assert friend.name == "Mike"
+      assert friend.divorce_count == 0
+    end
+  end
+
   describe "update/1" do
     test "updates the struct", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
@@ -525,19 +551,33 @@ defmodule Feeb.DBTest do
         |> Post.new()
         |> DB.insert!()
 
-      new_post = Post.change_title(post, "Other title")
+      assert {:ok, new_post} =
+               post
+               |> Post.change_title("Other title")
+               |> DB.update()
 
-      # NOTE: Updates with `RETURNING` are TODO
-      assert {:ok, _} = DB.update(new_post)
+      assert new_post.title == "Other title"
+      refute post.updated_at == new_post.updated_at
+    end
 
-      # The value has changed in the DB
-      assert [post_in_db] = DB.all(Post, [1])
-      assert post_in_db.title == "Other title"
+    test "update attempt that failed to find a matching entry", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      # Before updating, we'll delete this entry
+      assert DB.delete!(friend)
+
+      # Now let's try updating it
+      assert {:error, :not_found} =
+               friend
+               |> Friend.update(%{name: "Mr Heckles"})
+               |> DB.update()
     end
   end
 
   describe "update_all/3" do
-    test "performs the SQL-based update", %{shard_id: shard_id} do
+    test "performs the SQL-based update (without RETURNING)", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
       %{id: 1, title: "Post", body: "My Body", is_draft: true}
@@ -561,12 +601,59 @@ defmodule Feeb.DBTest do
       refute post_1.is_draft
       refute post_2.is_draft
     end
+
+    test "performs the SQL-based update (with RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      %{id: 2, title: "Post", body: "My Body", is_draft: true}
+      |> Post.new()
+      |> DB.insert!()
+
+      assert {:ok, 2} == DB.update_all({:posts, :publish_posts_by_title}, ["Post"], returning: true)
+    end
   end
 
   describe "update_all!/3" do
     test "performs the SQL-based update", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
       assert nil == DB.update_all!({:posts, :publish_posts_by_title}, ["No matches"])
+    end
+  end
+
+  describe "delete/1" do
+    test "deletes the struct", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      assert {:ok, friend} == DB.delete(friend)
+
+      # Can't find that Friend anymore
+      refute DB.one({:friends, :get_by_id}, [1])
+    end
+
+    test "deletes the struct (without RETURNING)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      assert {:ok, nil} == DB.delete(friend, returning: false)
+
+      # Can't find that Friend anymore
+      refute DB.one({:friends, :get_by_id}, [1])
+    end
+
+    test "delete attempt that failed to find a matching entry", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+      friend = DB.one({:friends, :get_by_id}, [1])
+
+      # The first operation succeeds
+      assert {:ok, friend} == DB.delete(friend)
+
+      # The second operation returns an error tuple
+      assert {:error, :not_found} == DB.delete(friend)
     end
   end
 
