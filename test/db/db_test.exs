@@ -714,4 +714,151 @@ defmodule Feeb.DBTest do
       assert [] = DB.all(Post)
     end
   end
+
+  describe "reload/1" do
+    test "reloads the given schema", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # We have an initial post titled "ABC"
+      post =
+        %{id: 1, title: "ABC", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      # It's been retitled to "XYZ"
+      post
+      |> Post.change_title("XYZ")
+      |> DB.update!()
+
+      # Of course, `post` still holds the "ABC" title (it's a variable)
+      assert post.title == "ABC"
+
+      # But once we reload it, we get the latest changes from the DB
+      assert reloaded_post = DB.reload(post)
+      assert reloaded_post.title == "XYZ"
+      refute reloaded_post.updated_at == post.updated_at
+    end
+
+    test "returns nil when the requested schema is not found", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post =
+        %{id: 1, title: "ABC", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      assert DB.delete!(post)
+
+      # Reload won't find it anymore
+      assert DB.reload(post) == nil
+    end
+
+    test "reloads a list of schemas", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post_1 =
+        %{id: 1, title: "ABC", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      post_2 =
+        %{id: 2, title: "123", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      # It's been retitled to "XYZ"
+      post_1
+      |> Post.change_title("XYZ")
+      |> DB.update!()
+
+      assert [reloaded_post_1, reloaded_post_2] = DB.reload([post_1, post_2])
+      assert reloaded_post_1.id == post_1.id
+      assert reloaded_post_1.title == "XYZ"
+
+      assert reloaded_post_2.id == post_2.id
+      assert reloaded_post_2.title == "123"
+
+      # Order is kept
+      assert [%{id: 2}, %{id: 1}] = DB.reload([post_2, post_1])
+
+      # Why not?
+      assert [%{id: 2}, %{id: 2}, %{id: 1}, %{id: 2}] = DB.reload([post_2, post_2, post_1, post_2])
+    end
+
+    test "returns nil when one of the request schemas is not found", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post_1 =
+        %{id: 1, title: "ABC", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      post_2 =
+        %{id: 2, title: "123", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      # post_2 has been deleted
+      DB.delete!(post_2)
+
+      assert [%{id: 1}, nil] = DB.reload([post_1, post_2])
+
+      # Order is kept
+      assert [nil, %{id: 1}] = DB.reload([post_2, post_1])
+    end
+  end
+
+  describe "reload!/1" do
+    test "raises when schema is not found", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post =
+        %{id: 1, title: "ABC", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      # It works at first
+      assert %{id: 1} = DB.reload!(post)
+
+      # But once we delete the post...
+      assert DB.delete!(post)
+
+      # ... trying to reload! it will crash
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          DB.reload!(post)
+        end
+
+      assert error =~ "Unable to reload; entry not found"
+    end
+
+    test "raises when one of the schemas is not found", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      post_1 =
+        %{id: 1, title: "ABC", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      post_2 =
+        %{id: 2, title: "123", body: "My Body"}
+        |> Post.new()
+        |> DB.insert!()
+
+      # It works fine at first
+      assert [%{id: 1}, %{id: 2}] = DB.reload!([post_1, post_2])
+      assert [%{id: 2}, %{id: 1}] = DB.reload!([post_2, post_1])
+
+      # But once `post_2` has been deleted...
+      DB.delete!(post_2)
+
+      # The operation crashes
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          DB.reload!([post_1, post_2])
+        end
+
+      assert error =~ "Unable to reload; entry not found"
+    end
+  end
 end

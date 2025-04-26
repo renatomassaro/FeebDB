@@ -236,6 +236,35 @@ defmodule Feeb.DB do
     r
   end
 
+  def reload(%schema{} = struct) do
+    # Support for custom or composite PKs is TODO
+    primary_key_cols = [:id]
+
+    bindings =
+      Enum.map(primary_key_cols, fn col_name ->
+        Map.fetch!(struct, col_name)
+      end)
+
+    one({schema.__table__(), :fetch}, bindings)
+  end
+
+  def reload(schemas) when is_list(schemas),
+    do: Enum.map(schemas, &reload/1)
+
+  def reload!(%schema{} = struct) do
+    case reload(struct) do
+      %^schema{} = result ->
+        result
+
+      nil ->
+        # TODO: Only log the PK of the struct
+        raise "Unable to reload; entry not found: #{inspect(struct)}"
+    end
+  end
+
+  def reload!(schemas) when is_list(schemas),
+    do: Enum.map(schemas, &reload!/1)
+
   ##################################################################################################
   # Private
   ##################################################################################################
