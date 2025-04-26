@@ -125,7 +125,6 @@ defmodule Feeb.DB.Boot do
   end
 
   def get_all_models do
-    # TODO: Schema.List should be generated from a JSON that lives in the application's priv/ folder
     Schema.List.all()
     |> Enum.map(fn {context, modules} ->
       modules_details =
