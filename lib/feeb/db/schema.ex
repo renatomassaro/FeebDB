@@ -105,15 +105,11 @@ defmodule Feeb.DB.Schema do
       def __context__, do: @context
       def __modded_fields__, do: @modded_fields
       def __derived_fields__, do: @derived_fields
+      def __primary_keys__, do: @primary_keys
     end
   end
 
   defmacro __after_compile__(env, _module) do
-    # santiy_checks()
-    # TODO:
-    # - Quais checks?
-    # - Que as env vars estao setadas
-
     assert_env = fn var ->
       if is_nil(Module.get_attribute(env.module, var)),
         do: raise("Missing @#{var} attribute in #{env.module}")
