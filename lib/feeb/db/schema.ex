@@ -93,6 +93,12 @@ defmodule Feeb.DB.Schema do
         @derived_fields []
       end
 
+      if :primary_keys not in Module.attributes_in(__MODULE__) do
+        # We default to `[:id]` as primary keys iff the schema does not define custom PKs. We can't
+        # use an `is_nil/1` check because @primary_keys nil should not be overriden.
+        @primary_keys [:id]
+      end
+
       defstruct Map.keys(@schema) ++ unquote(meta_keys)
 
       # TODO: Inline?
@@ -359,6 +365,9 @@ defmodule Feeb.DB.Schema do
 
   def get_private(%{__private__: private}, k), do: private[k]
   def get_private!(%{__private__: private}, k), do: Map.fetch!(private, k)
+
+  def get_model_from_query_id({context, table, _}),
+    do: :persistent_term.get({:db_table_models, {context, table}})
 
   defp add_missing_values(struct, f, f), do: struct
 
