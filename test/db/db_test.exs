@@ -790,6 +790,24 @@ defmodule Feeb.DBTest do
       refute reloaded_post.updated_at == post.updated_at
     end
 
+    test "reloads schemas with composite PKs", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      order_item =
+        %{order_id: 1, product_id: 2, quantity: 10, price: 50}
+        |> OrderItems.new()
+        |> DB.insert!()
+
+      # Now we can expect the order item to have a quantity of 20
+      assert {:ok, _} =
+               order_item
+               |> OrderItems.update(%{quantity: 20})
+               |> DB.update()
+
+      assert reloaded_order_item = DB.reload(order_item)
+      assert reloaded_order_item.quantity == 20
+    end
+
     test "returns nil when the requested schema is not found", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
@@ -856,6 +874,23 @@ defmodule Feeb.DBTest do
 
       # Order is kept
       assert [nil, %{id: 1}] = DB.reload([post_2, post_1])
+    end
+
+    test "raises if the requested schema has no PKs", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      all_types =
+        AllTypes.creation_params()
+        |> AllTypes.new()
+        |> DB.insert!()
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          DB.reload(all_types)
+        end
+
+      assert error =~ "Can't generate adhoc query"
+      assert error =~ "because Sample.AllTypes has no PKs"
     end
   end
 
