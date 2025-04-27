@@ -237,11 +237,8 @@ defmodule Feeb.DB do
   end
 
   def reload(%schema{} = struct) do
-    # Support for custom or composite PKs is TODO
-    primary_key_cols = [:id]
-
     bindings =
-      Enum.map(primary_key_cols, fn col_name ->
+      Enum.map(schema.__primary_keys__() || [], fn col_name ->
         Map.fetch!(struct, col_name)
       end)
 

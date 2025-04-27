@@ -1,5 +1,6 @@
 defmodule Feeb.DB.Query do
   require Logger
+  alias Feeb.DB.Schema
   alias __MODULE__.Binding
 
   @initial_q {"", {[], []}, nil}
@@ -35,7 +36,9 @@ defmodule Feeb.DB.Query do
   Compiling an adhoc query is useful when you want to select custom fields
   off of a "select *" query. It's like a subset of the original query
   """
+  @spec compile_adhoc_query(term, term) :: no_return
   def compile_adhoc_query({context, domain, query_name} = query_id, custom_fields) do
+    raise "Deprecated; consider implementing this feature as part of `get_templated_query_id/3`"
     query_name = :"#{query_name}$#{Enum.join(custom_fields, "$")}"
     adhoc_query_id = {context, domain, query_name}
 
@@ -53,10 +56,14 @@ defmodule Feeb.DB.Query do
     adhoc_query_id
   end
 
-  def get_templated_query_id({context, domain, :__insert}, target_fields, meta) do
+  def get_templated_query_id(query_id, target_fields, meta \\ %{})
+
+  def get_templated_query_id({context, domain, :__insert} = query_id, target_fields, _meta) do
+    model = Schema.get_model_from_query_id(query_id)
+
     target_fields =
       if target_fields == :all do
-        meta.schema.__cols__()
+        model.__cols__()
       else
         raise "Not supported for now, add & test it once needed"
         target_fields
@@ -70,11 +77,14 @@ defmodule Feeb.DB.Query do
         real_query_id
 
       nil ->
-        compile_templated_query(:__insert, real_query_id, target_fields)
+        compile_templated_query(:__insert, real_query_id, target_fields, model)
     end
   end
 
-  def get_templated_query_id({context, domain, :__update}, target_fields, _meta) do
+  def get_templated_query_id({context, domain, :__update} = query_id, target_fields, _meta) do
+    model = Schema.get_model_from_query_id(query_id)
+
+    # TODO: Transparently include `updated_at` (if present in the model)
     target_fields = Enum.sort(target_fields)
 
     query_name_suffix =
@@ -92,22 +102,24 @@ defmodule Feeb.DB.Query do
         real_query_id
 
       nil ->
-        compile_templated_query(:__update, real_query_id, target_fields)
+        compile_templated_query(:__update, real_query_id, target_fields, model)
     end
   end
 
   def get_templated_query_id({_context, _domain, query_name} = query_id, target_fields, _meta)
       when query_name in [:__all, :__fetch, :__delete] do
+    model = Schema.get_model_from_query_id(query_id)
+
     case get(query_id) do
       {_, _, _} = _compiled_query ->
         query_id
 
       nil ->
-        compile_templated_query(query_name, query_id, target_fields)
+        compile_templated_query(query_name, query_id, target_fields, model)
     end
   end
 
-  defp compile_templated_query(:__insert, {_, domain, _} = query_id, target_fields) do
+  defp compile_templated_query(:__insert, {_, domain, _} = query_id, target_fields, _model) do
     columns_clause = target_fields |> Enum.join(", ")
 
     values_clause =
@@ -123,11 +135,11 @@ defmodule Feeb.DB.Query do
     query_id
   end
 
-  defp compile_templated_query(:__update, {_, domain, _} = query_id, target_fields) do
-    # Hard-coded for now, but we may need this to be dynamc in the future
-    primary_key_col = :id
+  defp compile_templated_query(:__update, {_, domain, _} = query_id, target_fields, model) do
+    primary_keys = model.__primary_keys__()
+    assert_adhoc_query!(primary_keys, query_id, model)
 
-    set_clause =
+    set_conditions =
       target_fields
       |> Enum.reduce([], fn field, acc ->
         ["#{field} = ?" | acc]
@@ -135,30 +147,36 @@ defmodule Feeb.DB.Query do
       |> Enum.reverse()
       |> Enum.join(", ")
 
-    sql = "UPDATE #{domain} SET #{set_clause} WHERE id = ?;"
-    adhoc_query = {sql, {[], target_fields ++ [primary_key_col]}, :update}
+    sql = "UPDATE #{domain} SET #{set_conditions} #{generate_where_clause(primary_keys)};"
+    adhoc_query = {sql, {[], target_fields ++ primary_keys}, :update}
     append_runtime_query(query_id, adhoc_query)
 
     query_id
   end
 
-  defp compile_templated_query(:__all, {_, domain, _} = query_id, _target_fields) do
+  defp compile_templated_query(:__all, {_, domain, _} = query_id, _target_fields, _model) do
     sql = "SELECT * FROM #{domain};"
     adhoc_query = {sql, {[:*], []}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
 
-  defp compile_templated_query(:__fetch, {_, domain, _} = query_id, _target_fields) do
-    sql = "SELECT * FROM #{domain} WHERE id = ?;"
-    adhoc_query = {sql, {[:*], [:id]}, :select}
+  defp compile_templated_query(:__fetch, {_, domain, _} = query_id, _target_fields, model) do
+    primary_keys = model.__primary_keys__()
+    assert_adhoc_query!(primary_keys, query_id, model)
+    sql = "SELECT * FROM #{domain} #{generate_where_clause(primary_keys)};"
+
+    adhoc_query = {sql, {[:*], primary_keys}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
 
-  defp compile_templated_query(:__delete, {_, domain, _} = query_id, _target_fields) do
-    sql = "DELETE FROM #{domain} WHERE id = ?;"
-    adhoc_query = {sql, {[], [:id]}, :delete}
+  defp compile_templated_query(:__delete, {_, domain, _} = query_id, _target_fields, model) do
+    primary_keys = model.__primary_keys__()
+    assert_adhoc_query!(primary_keys, query_id, model)
+    sql = "DELETE FROM #{domain} #{generate_where_clause(primary_keys)};"
+
+    adhoc_query = {sql, {[], primary_keys}, :delete}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
@@ -234,6 +252,24 @@ defmodule Feeb.DB.Query do
 
   defp get_returning_fields({_, _, operation}) when operation in [:update, :delete],
     do: "*"
+
+  defp generate_where_clause(primary_keys) when is_list(primary_keys) do
+    where_conditions =
+      primary_keys
+      |> Enum.reduce([], fn field, acc ->
+        ["#{field} = ?" | acc]
+      end)
+      |> Enum.reverse()
+      |> Enum.join(" AND ")
+
+    "WHERE #{where_conditions}"
+  end
+
+  defp assert_adhoc_query!(nil, query_id, model) do
+    raise("Can't generate adhoc query #{inspect(query_id)} because #{inspect(model)} has no PKs")
+  end
+
+  defp assert_adhoc_query!(_, _, _), do: :ok
 
   # Line-break
   defp handle_line(<<>>, qs, id, q) when not is_nil(id) do

@@ -93,6 +93,12 @@ defmodule Feeb.DB.Schema do
         @derived_fields []
       end
 
+      if :primary_keys not in Module.attributes_in(__MODULE__) do
+        # We default to `[:id]` as primary keys iff the schema does not define custom PKs. We can't
+        # use an `is_nil/1` check because @primary_keys nil should not be overriden.
+        @primary_keys [:id]
+      end
+
       defstruct Map.keys(@schema) ++ unquote(meta_keys)
 
       # TODO: Inline?
@@ -105,15 +111,11 @@ defmodule Feeb.DB.Schema do
       def __context__, do: @context
       def __modded_fields__, do: @modded_fields
       def __derived_fields__, do: @derived_fields
+      def __primary_keys__, do: @primary_keys
     end
   end
 
   defmacro __after_compile__(env, _module) do
-    # santiy_checks()
-    # TODO:
-    # - Quais checks?
-    # - Que as env vars estao setadas
-
     assert_env = fn var ->
       if is_nil(Module.get_attribute(env.module, var)),
         do: raise("Missing @#{var} attribute in #{env.module}")
@@ -363,6 +365,9 @@ defmodule Feeb.DB.Schema do
 
   def get_private(%{__private__: private}, k), do: private[k]
   def get_private!(%{__private__: private}, k), do: Map.fetch!(private, k)
+
+  def get_model_from_query_id({context, table, _}),
+    do: :persistent_term.get({:db_table_models, {context, table}})
 
   defp add_missing_values(struct, f, f), do: struct
 

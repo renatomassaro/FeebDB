@@ -5,6 +5,8 @@ defmodule Sample.AllTypes do
   @context :test
   @table :all_types
 
+  @primary_keys nil
+
   @schema [
     {:boolean, :boolean},
     {:boolean_nullable, {:boolean, nullable: true}},

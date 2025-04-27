@@ -2,7 +2,7 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
-  alias Sample.{AllTypes, CustomTypes, Friend, Post}
+  alias Sample.{AllTypes, CustomTypes, Friend, OrderItems, Post}
   alias Sample.Types.TypedID
 
   @context :test
@@ -406,6 +406,29 @@ defmodule Feeb.DBTest do
       assert nil == DB.one({:friends, :get_by_id}, [0])
     end
 
+    test ":fetch templated query works", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert %{id: 1, name: "Phoebe"} = DB.one({:friends, :fetch}, [1])
+      assert nil == DB.one({:friends, :fetch}, [500])
+    end
+
+    test ":fetch templated query works on schema with composite PKs", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{order_id: 1, product_id: 2, quantity: 10, price: 50}
+      |> OrderItems.new()
+      |> DB.insert!()
+
+      order_item = DB.one({:order_items, :fetch}, [1, 2])
+      assert order_item.order_id == 1
+      assert order_item.product_id == 2
+      assert order_item.quantity == 10
+      assert order_item.price == 50
+
+      assert nil == DB.one({:order_items, :fetch}, [2, 1])
+    end
+
     test "supports the :format flag", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
@@ -560,6 +583,20 @@ defmodule Feeb.DBTest do
       refute post.updated_at == new_post.updated_at
     end
 
+    test "updates the struct on schema with composite PKs", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      order_item =
+        %{order_id: 1, product_id: 2, quantity: 10, price: 50}
+        |> OrderItems.new()
+        |> DB.insert!()
+
+      assert {:ok, %{order_id: 1, product_id: 2, quantity: 20}} =
+               order_item
+               |> OrderItems.update(%{quantity: 20})
+               |> DB.update()
+    end
+
     test "update attempt that failed to find a matching entry", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
@@ -655,6 +692,20 @@ defmodule Feeb.DBTest do
       refute DB.one({:friends, :get_by_id}, [1])
     end
 
+    test "deletes the struct (schema with composite PKs)", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      order_item =
+        %{order_id: 1, product_id: 2, quantity: 10, price: 50}
+        |> OrderItems.new()
+        |> DB.insert!()
+
+      assert {:ok, _} = DB.delete(order_item)
+
+      # OrderItem has been deleted
+      assert [] == DB.all(OrderItems)
+    end
+
     test "delete attempt that failed to find a matching entry", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
       friend = DB.one({:friends, :get_by_id}, [1])
@@ -739,6 +790,24 @@ defmodule Feeb.DBTest do
       refute reloaded_post.updated_at == post.updated_at
     end
 
+    test "reloads schemas with composite PKs", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      order_item =
+        %{order_id: 1, product_id: 2, quantity: 10, price: 50}
+        |> OrderItems.new()
+        |> DB.insert!()
+
+      # Now we can expect the order item to have a quantity of 20
+      assert {:ok, _} =
+               order_item
+               |> OrderItems.update(%{quantity: 20})
+               |> DB.update()
+
+      assert reloaded_order_item = DB.reload(order_item)
+      assert reloaded_order_item.quantity == 20
+    end
+
     test "returns nil when the requested schema is not found", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
@@ -805,6 +874,23 @@ defmodule Feeb.DBTest do
 
       # Order is kept
       assert [nil, %{id: 1}] = DB.reload([post_2, post_1])
+    end
+
+    test "raises if the requested schema has no PKs", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      all_types =
+        AllTypes.creation_params()
+        |> AllTypes.new()
+        |> DB.insert!()
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          DB.reload(all_types)
+        end
+
+      assert error =~ "Can't generate adhoc query"
+      assert error =~ "because Sample.AllTypes has no PKs"
     end
   end
 
