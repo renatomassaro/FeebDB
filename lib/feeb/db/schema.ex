@@ -366,6 +366,9 @@ defmodule Feeb.DB.Schema do
   def get_private(%{__private__: private}, k), do: private[k]
   def get_private!(%{__private__: private}, k), do: Map.fetch!(private, k)
 
+  def get_model_from_query_id({context, table, _}),
+    do: :persistent_term.get({:db_table_models, {context, table}})
+
   defp add_missing_values(struct, f, f), do: struct
 
   defp add_missing_values(struct, all_fields, added_fields) do

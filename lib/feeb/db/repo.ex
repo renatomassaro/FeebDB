@@ -345,22 +345,22 @@ defmodule Feeb.DB.Repo do
   defp create_schema_from_rows({_, :pragma, _}, _, rows), do: rows
 
   defp create_schema_from_rows(query_id, {_, {fields_bindings, _}, :select}, rows) do
-    model = get_model_from_query_id(query_id)
+    model = Schema.get_model_from_query_id(query_id)
     Enum.map(rows, fn row -> Schema.from_row(model, fields_bindings, row) end)
   end
 
   defp create_schema_from_rows(query_id, {_, {_, params_bindings}, :insert}, rows) do
-    model = get_model_from_query_id(query_id)
+    model = Schema.get_model_from_query_id(query_id)
     Enum.map(rows, fn row -> Schema.from_row(model, params_bindings, row) end)
   end
 
   defp create_schema_from_rows(query_id, {_, _, :update}, rows) do
-    model = get_model_from_query_id(query_id)
+    model = Schema.get_model_from_query_id(query_id)
     Enum.map(rows, fn row -> Schema.from_row(model, model.__cols__(), row) end)
   end
 
   defp create_schema_from_rows(query_id, {_, _, :delete}, rows) do
-    model = get_model_from_query_id(query_id)
+    model = Schema.get_model_from_query_id(query_id)
     Enum.map(rows, fn row -> Schema.from_row(model, model.__cols__(), row) end)
   end
 
@@ -397,10 +397,6 @@ defmodule Feeb.DB.Repo do
     :rand.uniform()
     |> Kernel.*(1_000_000)
     |> trunc()
-  end
-
-  defp get_model_from_query_id({context, domain, _}) do
-    :persistent_term.get({:db_table_models, {context, domain}})
   end
 
   # TODO: These pragma functions will be removed once that gets turned into a hook
