@@ -36,7 +36,9 @@ defmodule Feeb.DB.Query do
   Compiling an adhoc query is useful when you want to select custom fields
   off of a "select *" query. It's like a subset of the original query
   """
+  @spec compile_adhoc_query(term, term) :: no_return
   def compile_adhoc_query({context, domain, query_name} = query_id, custom_fields) do
+    raise "Deprecated; consider implementing this feature as part of `get_templated_query_id/3`"
     query_name = :"#{query_name}$#{Enum.join(custom_fields, "$")}"
     adhoc_query_id = {context, domain, query_name}
 
