@@ -54,7 +54,7 @@ defmodule Feeb.DB.QueryTest do
 
       # Ensures the :__fetch is compiled (due to it being an "ad-hoc" query)
       query_id = {:test, :friends, :__all}
-      Query.get_templated_query_id(query_id, [])
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
@@ -63,11 +63,23 @@ defmodule Feeb.DB.QueryTest do
       assert sql == "SELECT * FROM friends;"
     end
 
+    test ":__all - with custom target fields" do
+      Query.compile(@friends_path, {:test, :friends})
+
+      query_id = Query.get_templated_query_id({:test, :friends, :__all}, [:name])
+
+      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert query_type == :select
+      assert target_fields == [:name]
+      assert bindings == []
+      assert sql == "SELECT name FROM friends;"
+    end
+
     test ":__fetch" do
       Query.compile(@friends_path, {:test, :friends})
 
       query_id = {:test, :friends, :__fetch}
-      Query.get_templated_query_id(query_id, [])
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
@@ -80,13 +92,25 @@ defmodule Feeb.DB.QueryTest do
       Query.compile(@order_items_path, {:test, :order_items})
 
       query_id = {:test, :order_items, :__fetch}
-      Query.get_templated_query_id(query_id, [])
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:*]
       assert bindings == [:order_id, :product_id]
       assert sql == "SELECT * FROM order_items WHERE order_id = ? AND product_id = ?;"
+    end
+
+    test ":__fetch - with custom target fields" do
+      Query.compile(@order_items_path, {:test, :order_items})
+
+      query_id = Query.get_templated_query_id({:test, :order_items, :__fetch}, [:quantity, :price])
+
+      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert sql == "SELECT quantity, price FROM order_items WHERE order_id = ? AND product_id = ?;"
+      assert target_fields == [:quantity, :price]
+      assert bindings == [:order_id, :product_id]
+      assert query_type == :select
     end
 
     test ":__fetch - raises when schema has no PK" do
@@ -96,7 +120,7 @@ defmodule Feeb.DB.QueryTest do
 
       %{message: error} =
         assert_raise RuntimeError, fn ->
-          Query.get_templated_query_id(query_id, [])
+          Query.get_templated_query_id(query_id, [:*])
         end
 
       assert error =~ "Can't generate adhoc query"
@@ -108,7 +132,7 @@ defmodule Feeb.DB.QueryTest do
       Query.compile(@friends_path, {:test, :friends})
 
       query_id = {:test, :friends, :__insert}
-      Query.get_templated_query_id(query_id, :all)
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :insert

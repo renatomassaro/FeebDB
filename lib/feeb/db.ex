@@ -96,10 +96,11 @@ defmodule Feeb.DB do
 
   def one(partial_or_full_query_id, bindings \\ [], opts \\ [])
 
-  # TODO: See Feeb.DB, I also support `custom_fields`
   def one({domain, :fetch}, bindings, opts) when is_list(bindings) do
+    target_fields = opts[:select] || [:*]
+
     {get_context!(), domain, :__fetch}
-    |> Query.get_templated_query_id([], %{})
+    |> Query.get_templated_query_id(target_fields, %{})
     |> one(bindings, opts)
   end
 
@@ -127,8 +128,10 @@ defmodule Feeb.DB do
   def all(partial_or_full_query_id, bindings \\ [], opts \\ [])
 
   def all(schema, _bindings, opts) when is_atom(schema) do
+    target_fields = opts[:select] || [:*]
+
     {get_context!(), schema.__table__(), :__all}
-    |> Query.get_templated_query_id(:all, %{})
+    |> Query.get_templated_query_id(target_fields, %{})
     |> all([], opts)
   end
 
@@ -147,7 +150,7 @@ defmodule Feeb.DB do
 
   def insert(%schema{} = struct, opts \\ []) do
     {get_context!(), schema.__table__(), :__insert}
-    |> Query.get_templated_query_id(:all, %{schema: schema})
+    |> Query.get_templated_query_id([:*], %{schema: schema})
     |> insert_sql(struct, opts)
   end
 

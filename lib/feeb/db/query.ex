@@ -58,11 +58,26 @@ defmodule Feeb.DB.Query do
 
   def get_templated_query_id(query_id, target_fields, meta \\ %{})
 
+  def get_templated_query_id({context, domain, query_name} = query_id, target_fields, _meta)
+      when query_name in [:__all, :__fetch] do
+    model = Schema.get_model_from_query_id(query_id)
+
+    real_query_id = {context, domain, :"#{query_name}$#{get_query_name_suffix(target_fields)}"}
+
+    case get(real_query_id) do
+      {_, _, _} = _compiled_query ->
+        real_query_id
+
+      nil ->
+        compile_templated_query(query_name, query_id, target_fields, model)
+    end
+  end
+
   def get_templated_query_id({context, domain, :__insert} = query_id, target_fields, _meta) do
     model = Schema.get_model_from_query_id(query_id)
 
     target_fields =
-      if target_fields == :all do
+      if target_fields == [:*] do
         model.__cols__()
       else
         raise "Not supported for now, add & test it once needed"
@@ -106,8 +121,7 @@ defmodule Feeb.DB.Query do
     end
   end
 
-  def get_templated_query_id({_context, _domain, query_name} = query_id, target_fields, _meta)
-      when query_name in [:__all, :__fetch, :__delete] do
+  def get_templated_query_id({_context, _domain, :__delete} = query_id, target_fields, _meta) do
     model = Schema.get_model_from_query_id(query_id)
 
     case get(query_id) do
@@ -115,7 +129,7 @@ defmodule Feeb.DB.Query do
         query_id
 
       nil ->
-        compile_templated_query(query_name, query_id, target_fields, model)
+        compile_templated_query(:__delete, query_id, target_fields, model)
     end
   end
 
@@ -139,34 +153,32 @@ defmodule Feeb.DB.Query do
     primary_keys = model.__primary_keys__()
     assert_adhoc_query!(primary_keys, query_id, model)
 
-    set_conditions =
-      target_fields
-      |> Enum.reduce([], fn field, acc ->
-        ["#{field} = ?" | acc]
-      end)
-      |> Enum.reverse()
-      |> Enum.join(", ")
+    set_clause = generate_update_set_clause(target_fields)
+    where_clause = generate_where_clause(primary_keys)
+    sql = "UPDATE #{domain} #{set_clause} #{where_clause};"
 
-    sql = "UPDATE #{domain} SET #{set_conditions} #{generate_where_clause(primary_keys)};"
     adhoc_query = {sql, {[], target_fields ++ primary_keys}, :update}
     append_runtime_query(query_id, adhoc_query)
 
     query_id
   end
 
-  defp compile_templated_query(:__all, {_, domain, _} = query_id, _target_fields, _model) do
-    sql = "SELECT * FROM #{domain};"
-    adhoc_query = {sql, {[:*], []}, :select}
+  defp compile_templated_query(:__all, {_, domain, _} = query_id, target_fields, _model) do
+    sql = "#{generate_select_clause(target_fields)} FROM #{domain};"
+    adhoc_query = {sql, {target_fields, []}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
 
-  defp compile_templated_query(:__fetch, {_, domain, _} = query_id, _target_fields, model) do
+  defp compile_templated_query(:__fetch, {_, domain, _} = query_id, target_fields, model) do
     primary_keys = model.__primary_keys__()
     assert_adhoc_query!(primary_keys, query_id, model)
-    sql = "SELECT * FROM #{domain} #{generate_where_clause(primary_keys)};"
 
-    adhoc_query = {sql, {[:*], primary_keys}, :select}
+    select_clause = generate_select_clause(target_fields)
+    where_clause = generate_where_clause(primary_keys)
+    sql = "#{select_clause} FROM #{domain} #{where_clause};"
+
+    adhoc_query = {sql, {target_fields, primary_keys}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
@@ -232,6 +244,16 @@ defmodule Feeb.DB.Query do
     end
   end
 
+  defp get_query_name_suffix(target_fields) when is_list(target_fields) do
+    target_fields
+    |> Enum.sort()
+    |> Enum.reduce([], fn field, acc ->
+      ["#{field}" | acc]
+    end)
+    |> Enum.reverse()
+    |> Enum.join("$")
+  end
+
   defp maybe_inject_returning_clause(nil, _), do: nil
   defp maybe_inject_returning_clause(query, []), do: query
 
@@ -252,6 +274,32 @@ defmodule Feeb.DB.Query do
 
   defp get_returning_fields({_, _, operation}) when operation in [:update, :delete],
     do: "*"
+
+  defp generate_select_clause([]), do: "SELECT *"
+
+  defp generate_select_clause(fields) when is_list(fields) do
+    select_conditions =
+      fields
+      |> Enum.reduce([], fn field, acc ->
+        ["#{field}" | acc]
+      end)
+      |> Enum.reverse()
+      |> Enum.join(", ")
+
+    "SELECT #{select_conditions}"
+  end
+
+  defp generate_update_set_clause(fields) when is_list(fields) do
+    set_conditions =
+      fields
+      |> Enum.reduce([], fn field, acc ->
+        ["#{field} = ?" | acc]
+      end)
+      |> Enum.reverse()
+      |> Enum.join(", ")
+
+    "SET #{set_conditions}"
+  end
 
   defp generate_where_clause(primary_keys) when is_list(primary_keys) do
     where_conditions =

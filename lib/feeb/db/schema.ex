@@ -126,7 +126,8 @@ defmodule Feeb.DB.Schema do
     assert_env.(:schema)
   end
 
-  defmacro cast(args, target_fields \\ unquote(:all)) do
+  # TODO: Why is this a macro?
+  defmacro cast(args, target_fields \\ unquote([:*])) do
     quote do
       meta = %{
         valid?: true,

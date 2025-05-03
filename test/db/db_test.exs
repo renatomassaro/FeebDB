@@ -2,6 +2,7 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
+  alias Feeb.DB.Value.NotLoaded
   alias Sample.{AllTypes, CustomTypes, Friend, OrderItems, Post}
   alias Sample.Types.TypedID
 
@@ -398,7 +399,7 @@ defmodule Feeb.DBTest do
     end
   end
 
-  describe "one/1" do
+  describe "one/3" do
     test "returns the expected result", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :read)
       assert %{id: 1, name: "Phoebe"} = DB.one({:friends, :get_by_id}, [1])
@@ -406,14 +407,21 @@ defmodule Feeb.DBTest do
       assert nil == DB.one({:friends, :get_by_id}, [0])
     end
 
-    test ":fetch templated query works", %{shard_id: shard_id} do
+    test ":__fetch templated query works", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
       assert %{id: 1, name: "Phoebe"} = DB.one({:friends, :fetch}, [1])
       assert nil == DB.one({:friends, :fetch}, [500])
     end
 
-    test ":fetch templated query works on schema with composite PKs", %{shard_id: shard_id} do
+    test ":__fetch templated query with custom selection", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert %{id: %NotLoaded{}, name: "Phoebe"} = DB.one({:friends, :fetch}, [1], select: [:name])
+      assert nil == DB.one({:friends, :fetch}, [500], select: [:name])
+    end
+
+    test ":__fetch templated query works on schema with composite PKs", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
       %{order_id: 1, product_id: 2, quantity: 10, price: 50}
@@ -505,6 +513,29 @@ defmodule Feeb.DBTest do
   end
 
   describe "all/3" do
+    test ":__all templated query works", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # There are 6 friends
+      assert [_, _, _, _, _, _] = DB.all(Friend)
+
+      %{id: 1, title: "My Post", body: "My Body"}
+      |> Post.new()
+      |> DB.insert!()
+
+      assert [%{id: 1, title: "My Post", body: "My Body"}] = DB.all(Post)
+    end
+
+    test ":__all templated query works with custom selection", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body"}
+      |> Post.new()
+      |> DB.insert!()
+
+      assert [%{id: 1, title: "Post", body: %NotLoaded{}}] = DB.all(Post, [], select: [:id, :title])
+    end
+
     test "supports the :format flag", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
