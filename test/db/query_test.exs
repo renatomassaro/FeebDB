@@ -1,7 +1,7 @@
 defmodule Feeb.DB.QueryTest do
   # Reason for `async: false`: this test suite interacts directly with the compiled queries cache.
   # While it's technically possible to adapt the cache to be per-test, I don't think it's worth the
-  # added complexity. As such, I'd rather have this test suite run separately from the rest.
+  # added complexity. As such, I'd rather have this test suite running separately from the rest.
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog
 
@@ -111,6 +111,17 @@ defmodule Feeb.DB.QueryTest do
       assert target_fields == [:quantity, :price]
       assert bindings == [:order_id, :product_id]
       assert query_type == :select
+    end
+
+    test ":__fetch - raises when invalid fields are selected" do
+      Query.compile(@order_items_path, {:test, :order_items})
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          Query.get_templated_query_id({:test, :order_items, :__fetch}, [:i_dont_exist])
+        end
+
+      assert error =~ "Can't select :i_dont_exist; not a valid field for Elixir.Sample.OrderItems"
     end
 
     test ":__fetch - raises when schema has no PK" do

@@ -163,8 +163,8 @@ defmodule Feeb.DB.Query do
     query_id
   end
 
-  defp compile_templated_query(:__all, {_, domain, _} = query_id, target_fields, _model) do
-    sql = "#{generate_select_clause(target_fields)} FROM #{domain};"
+  defp compile_templated_query(:__all, {_, domain, _} = query_id, target_fields, model) do
+    sql = "#{generate_select_clause(target_fields, model)} FROM #{domain};"
     adhoc_query = {sql, {target_fields, []}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
@@ -174,7 +174,7 @@ defmodule Feeb.DB.Query do
     primary_keys = model.__primary_keys__()
     assert_adhoc_query!(primary_keys, query_id, model)
 
-    select_clause = generate_select_clause(target_fields)
+    select_clause = generate_select_clause(target_fields, model)
     where_clause = generate_where_clause(primary_keys)
     sql = "#{select_clause} FROM #{domain} #{where_clause};"
 
@@ -275,12 +275,17 @@ defmodule Feeb.DB.Query do
   defp get_returning_fields({_, _, operation}) when operation in [:update, :delete],
     do: "*"
 
-  defp generate_select_clause([]), do: "SELECT *"
+  defp generate_select_clause([:*], _), do: "SELECT *"
 
-  defp generate_select_clause(fields) when is_list(fields) do
+  defp generate_select_clause(fields, model) when is_list(fields) do
+    valid_fields = model.__cols__()
+
     select_conditions =
       fields
       |> Enum.reduce([], fn field, acc ->
+        if field not in valid_fields,
+          do: raise("Can't select #{inspect(field)}; not a valid field for #{model}")
+
         ["#{field}" | acc]
       end)
       |> Enum.reverse()
