@@ -48,6 +48,48 @@ defmodule Feeb.DB.QueryTest do
     end
   end
 
+  describe "compile_adhoc_query/2" do
+    test "generates a subset of the original query" do
+      Query.compile(@all_types_path, {:test, :all_types})
+
+      original_query_id = {:test, :all_types, :get_by_integer}
+      query_id = Query.compile_adhoc_query(original_query_id, [:string, :atom, :uuid])
+
+      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id, [])
+      assert query_type == :select
+      assert target_fields == [:atom, :string, :uuid]
+      assert bindings == [:integer]
+      assert sql == "select atom, string, uuid from all_types where integer = ?;"
+    end
+
+    test "raises on custom selection of a non-wildcard select query" do
+      Query.compile(@all_types_path, {:test, :all_types})
+
+      # This query is: `SELECT atom, integer FROM all_types;`
+      original_query_id = {:test, :all_types, :get_atom_and_integer}
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          Query.compile_adhoc_query(original_query_id, [:string, :atom, :uuid])
+        end
+
+      assert error =~ "Custom selection can only be used on 'SELECT *' queries"
+    end
+
+    test "raises when trying to select a field that does not exist in the schema" do
+      Query.compile(@all_types_path, {:test, :all_types})
+
+      original_query_id = {:test, :all_types, :get_by_integer}
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          Query.compile_adhoc_query(original_query_id, [:string, :i_dont_exist, :atom])
+        end
+
+      assert error =~ "Can't select :i_dont_exist; not a valid field for Elixir.Sample.AllTypes"
+    end
+  end
+
   describe "get_templated_query_id/3" do
     test ":__all" do
       Query.compile(@friends_path, {:test, :friends})

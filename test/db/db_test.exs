@@ -437,6 +437,13 @@ defmodule Feeb.DBTest do
       assert nil == DB.one({:order_items, :fetch}, [2, 1])
     end
 
+    test "supports custom selection on user-defined queries", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :read)
+
+      assert %{id: %NotLoaded{}, name: "Phoebe"} =
+               DB.one({:friends, :get_by_name}, "Phoebe", select: [:name])
+    end
+
     test "supports the :format flag", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
@@ -534,6 +541,13 @@ defmodule Feeb.DBTest do
       |> DB.insert!()
 
       assert [%{id: 1, title: "Post", body: %NotLoaded{}}] = DB.all(Post, [], select: [:id, :title])
+    end
+
+    test "supports custom selection on user-defined queries", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :read)
+
+      assert [%{id: %NotLoaded{}, name: "Phoebe"}] =
+               DB.all({:friends, :get_by_name}, "Phoebe", select: [:name])
     end
 
     test "supports the :format flag", %{shard_id: shard_id} do

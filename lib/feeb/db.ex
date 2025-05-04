@@ -107,7 +107,9 @@ defmodule Feeb.DB do
   def one({domain, :fetch}, value, opts), do: one({domain, :fetch}, [value], opts)
 
   def one({domain, query_name}, bindings, opts) when is_list(bindings) do
-    one({get_context!(), domain, query_name}, bindings, opts)
+    {get_context!(), domain, query_name}
+    |> get_query_id_for_select_query(opts)
+    |> one(bindings, opts)
   end
 
   def one({domain, query_name}, value, opts), do: one({domain, query_name}, [value], opts)
@@ -135,13 +137,15 @@ defmodule Feeb.DB do
     |> all([], opts)
   end
 
-  def all({domain, query_name}, bindings, opts) do
-    all({get_context!(), domain, query_name}, bindings, opts)
+  def all({domain, query_name}, bindings, opts) when is_list(bindings) do
+    {get_context!(), domain, query_name}
+    |> get_query_id_for_select_query(opts)
+    |> all(bindings, opts)
   end
 
-  def all({_, domain, query_name}, bindings, opts) do
-    bindings = if is_list(bindings), do: bindings, else: [bindings]
+  def all({domain, query_name}, value, opts), do: all({domain, query_name}, [value], opts)
 
+  def all({_, domain, query_name}, bindings, opts) do
     case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings, opts}) do
       {:ok, rows} -> rows
       {:error, reason} -> raise reason
@@ -289,6 +293,18 @@ defmodule Feeb.DB do
 
   defp get_context! do
     LocalState.get_current_context!().context
+  end
+
+  defp get_query_id_for_select_query(original_query_id, []), do: original_query_id
+
+  defp get_query_id_for_select_query(original_query_id, opts) do
+    target_fields = opts[:select] || [:*]
+
+    if target_fields == [:*] do
+      original_query_id
+    else
+      Query.compile_adhoc_query(original_query_id, target_fields)
+    end
   end
 
   defp get_bindings(query_id, struct) do

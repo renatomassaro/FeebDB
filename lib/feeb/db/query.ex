@@ -33,24 +33,32 @@ defmodule Feeb.DB.Query do
   end
 
   @doc """
-  Compiling an adhoc query is useful when you want to select custom fields
-  off of a "select *" query. It's like a subset of the original query
+  Compiling an adhoc query is useful when the user wants to select custom fields off of a `SELECT *`
+  query. It's essentially a subset of the original query, with specific fields being selected.
   """
   @spec compile_adhoc_query(term, term) :: no_return
-  def compile_adhoc_query({context, domain, query_name} = query_id, custom_fields) do
-    raise "Deprecated; consider implementing this feature as part of `get_templated_query_id/3`"
-    query_name = :"#{query_name}$#{Enum.join(custom_fields, "$")}"
-    adhoc_query_id = {context, domain, query_name}
+  def compile_adhoc_query({context, domain, query_name} = original_query_id, target_fields) do
+    model = Schema.get_model_from_query_id(original_query_id)
+    valid_fields = model.__cols__()
+    sorted_target_fields = Enum.sort(target_fields)
 
-    {sql, {fields_bindings, params_bindings}, qt} = fetch!(query_id)
+    adhoc_query_name = :"#{query_name}$#{get_query_name_suffix(sorted_target_fields)}"
+    adhoc_query_id = {context, domain, adhoc_query_name}
+
+    {sql, {fields_bindings, params_bindings}, qt} = fetch!(original_query_id)
 
     if fields_bindings != [:*] do
-      raise "#{inspect(query_id)}: Custom fields can only be used on 'SELECT *' queries"
+      raise "#{inspect(original_query_id)}: Custom selection can only be used on 'SELECT *' queries"
     end
 
-    # "Compile" new query
-    new_sql = String.replace(sql, "*", Enum.join(custom_fields, ", "))
-    adhoc_q = {new_sql, {custom_fields, params_bindings}, qt}
+    Enum.each(target_fields, fn field ->
+      if field not in valid_fields,
+        do: raise("Can't select #{inspect(field)}; not a valid field for #{model}")
+    end)
+
+    # "Compile" new query (replaces `SELECT *` with `SELECT <sorted_target_fields>`)
+    new_sql = String.replace(sql, "*", Enum.join(sorted_target_fields, ", "), global: false)
+    adhoc_q = {new_sql, {sorted_target_fields, params_bindings}, qt}
 
     append_runtime_query(adhoc_query_id, adhoc_q)
     adhoc_query_id
