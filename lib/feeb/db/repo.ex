@@ -283,8 +283,8 @@ defmodule Feeb.DB.Repo do
 
   defp format_result(:one, _, _, [row], _, %{format: :raw}), do: {:ok, row}
 
-  defp format_result(:one, query_id, query, [row], _, %{format: :type}),
-    do: {:ok, create_types_from_rows(query_id, query, [row]) |> List.first()}
+  defp format_result(:one, query_id, query, [row], _, %{format: :map}),
+    do: {:ok, create_maps_from_rows(query_id, query, [row]) |> List.first()}
 
   defp format_result(:one, query_id, query, [row], _, _),
     do: {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
@@ -295,13 +295,13 @@ defmodule Feeb.DB.Repo do
   defp format_result(:all, _, _, [], _, _), do: {:ok, []}
   defp format_result(:all, _, _, rows, _, %{format: :raw}), do: {:ok, rows}
 
-  defp format_result(:all, query_id, query, rows, _, %{format: :type}),
-    do: {:ok, create_types_from_rows(query_id, query, rows)}
+  defp format_result(:all, query_id, query, rows, _, %{format: :map}),
+    do: {:ok, create_maps_from_rows(query_id, query, rows)}
 
   defp format_result(:all, query_id, query, rows, _, %{format: :schema}),
     do: {:ok, create_schema_from_rows(query_id, query, rows)}
 
-  defp format_result(:insert, _, _, [], _, %{format: format}) when format in [:raw, :type],
+  defp format_result(:insert, _, _, [], _, %{format: format}) when format in [:raw, :map],
     do: {:ok, nil}
 
   defp format_result(:insert, query_id, query, [], bindings, %{format: :schema}) do
@@ -364,7 +364,7 @@ defmodule Feeb.DB.Repo do
     Enum.map(rows, fn row -> Schema.from_row(model, model.__cols__(), row) end)
   end
 
-  defp create_types_from_rows(query_id, {_, {fields_bindings, _}, :select} = query, rows) do
+  defp create_maps_from_rows(query_id, {_, {fields_bindings, _}, :select} = query, rows) do
     # Performance-wise, not the best solution, but I'd rather keep the code readable for a bit
     # longer. Simply create the full schema and use only the fields the user selected
     create_schema_from_rows(query_id, query, rows)

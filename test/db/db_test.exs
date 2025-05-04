@@ -462,20 +462,20 @@ defmodule Feeb.DBTest do
       assert ["i_am_atom", 50] == DB.one({:all_types, :get_atom_and_integer}, [], format: :raw)
       assert ["{\"foo\":\"bar\"}"] == DB.one({:all_types, :get_map_keys_atom}, [], format: :raw)
 
-      # With the :type flag, we return the values formatted by their types _without_ the full schema
+      # With the :map flag, we return the values formatted by their types _without_ the full schema
       assert %{map_keys_atom: %{foo: "bar"}} ==
-               DB.one({:all_types, :get_map_keys_atom}, [], format: :type)
+               DB.one({:all_types, :get_map_keys_atom}, [], format: :map)
 
       assert %{atom: :i_am_atom, integer: 50} ==
-               DB.one({:all_types, :get_atom_and_integer}, [], format: :type)
+               DB.one({:all_types, :get_atom_and_integer}, [], format: :map)
 
       # Custom selection with different formats
       assert ["Phoebe"] = DB.one({:friends, :fetch}, [1], select: [:name], format: :raw)
-      assert %{name: "Phoebe"} = DB.one({:friends, :fetch}, [1], select: [:name], format: :type)
+      assert %{name: "Phoebe"} = DB.one({:friends, :fetch}, [1], select: [:name], format: :map)
 
       # No matching results
       assert nil == DB.one({:friends, :fetch}, [500], select: [:name], format: :raw)
-      assert nil == DB.one({:friends, :fetch}, [500], select: [:name], format: :type)
+      assert nil == DB.one({:friends, :fetch}, [500], select: [:name], format: :map)
     end
 
     test "works with window functions when using :raw flag", %{shard_id: shard_id} do
@@ -583,21 +583,21 @@ defmodule Feeb.DBTest do
       assert [["{\"foo\":\"bar\"}"], ["{\"girl\":[\"so\",\"confusing\"]}"]] |> Enum.sort() ==
                DB.all({:all_types, :get_map}, [], format: :raw) |> Enum.sort()
 
-      # With the :type flag, we return the values formatted by their types _without_ the full schema
+      # With the :map flag, we return the values formatted by their types _without_ the full schema
       assert [%{map: %{girl: ["so", "confusing"]}}, %{map: %{foo: "bar"}}] |> Enum.sort() ==
-               DB.all({:all_types, :get_map}, [], format: :type) |> Enum.sort()
+               DB.all({:all_types, :get_map}, [], format: :map) |> Enum.sort()
 
       assert [%{atom: :i_am_atom, integer: 50}, %{atom: :other_atom, integer: -2}] |> Enum.sort() ==
-               DB.all({:all_types, :get_atom_and_integer}, [], format: :type) |> Enum.sort()
+               DB.all({:all_types, :get_atom_and_integer}, [], format: :map) |> Enum.sort()
 
       # Custom selection with different formats
       assert [%{name: "Phoebe"}] =
-               DB.all({:friends, :get_by_name}, "Phoebe", select: [:name], format: :type)
+               DB.all({:friends, :get_by_name}, "Phoebe", select: [:name], format: :map)
 
       assert [["Joey"]] = DB.all({:friends, :get_by_name}, "Joey", select: [:name], format: :raw)
 
       # No matching results
-      assert [] == DB.all({:friends, :get_by_name}, "Michael Scott", format: :type)
+      assert [] == DB.all({:friends, :get_by_name}, "Michael Scott", format: :map)
     end
   end
 
