@@ -2,6 +2,7 @@ defmodule Feeb.DBTest do
   use Test.Feeb.DBCase, async: true
   alias Feeb.DB, as: DB
   alias Feeb.DB.LocalState
+  alias Feeb.DB.Value.NotLoaded
   alias Sample.{AllTypes, CustomTypes, Friend, OrderItems, Post}
   alias Sample.Types.TypedID
 
@@ -398,7 +399,7 @@ defmodule Feeb.DBTest do
     end
   end
 
-  describe "one/1" do
+  describe "one/3" do
     test "returns the expected result", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :read)
       assert %{id: 1, name: "Phoebe"} = DB.one({:friends, :get_by_id}, [1])
@@ -406,14 +407,21 @@ defmodule Feeb.DBTest do
       assert nil == DB.one({:friends, :get_by_id}, [0])
     end
 
-    test ":fetch templated query works", %{shard_id: shard_id} do
+    test ":__fetch templated query works", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
       assert %{id: 1, name: "Phoebe"} = DB.one({:friends, :fetch}, [1])
       assert nil == DB.one({:friends, :fetch}, [500])
     end
 
-    test ":fetch templated query works on schema with composite PKs", %{shard_id: shard_id} do
+    test ":__fetch templated query with custom selection", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      assert %{id: %NotLoaded{}, name: "Phoebe"} = DB.one({:friends, :fetch}, [1], select: [:name])
+      assert nil == DB.one({:friends, :fetch}, [500], select: [:name])
+    end
+
+    test ":__fetch templated query works on schema with composite PKs", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
       %{order_id: 1, product_id: 2, quantity: 10, price: 50}
@@ -427,6 +435,13 @@ defmodule Feeb.DBTest do
       assert order_item.price == 50
 
       assert nil == DB.one({:order_items, :fetch}, [2, 1])
+    end
+
+    test "supports custom selection on user-defined queries", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :read)
+
+      assert %{id: %NotLoaded{}, name: "Phoebe"} =
+               DB.one({:friends, :get_by_name}, "Phoebe", select: [:name])
     end
 
     test "supports the :format flag", %{shard_id: shard_id} do
@@ -447,12 +462,20 @@ defmodule Feeb.DBTest do
       assert ["i_am_atom", 50] == DB.one({:all_types, :get_atom_and_integer}, [], format: :raw)
       assert ["{\"foo\":\"bar\"}"] == DB.one({:all_types, :get_map_keys_atom}, [], format: :raw)
 
-      # With the :type flag, we return the values formatted by their types _without_ the full schema
+      # With the :map flag, we return the values formatted by their types _without_ the full schema
       assert %{map_keys_atom: %{foo: "bar"}} ==
-               DB.one({:all_types, :get_map_keys_atom}, [], format: :type)
+               DB.one({:all_types, :get_map_keys_atom}, [], format: :map)
 
       assert %{atom: :i_am_atom, integer: 50} ==
-               DB.one({:all_types, :get_atom_and_integer}, [], format: :type)
+               DB.one({:all_types, :get_atom_and_integer}, [], format: :map)
+
+      # Custom selection with different formats
+      assert ["Phoebe"] = DB.one({:friends, :fetch}, [1], select: [:name], format: :raw)
+      assert %{name: "Phoebe"} = DB.one({:friends, :fetch}, [1], select: [:name], format: :map)
+
+      # No matching results
+      assert nil == DB.one({:friends, :fetch}, [500], select: [:name], format: :raw)
+      assert nil == DB.one({:friends, :fetch}, [500], select: [:name], format: :map)
     end
 
     test "works with window functions when using :raw flag", %{shard_id: shard_id} do
@@ -505,6 +528,36 @@ defmodule Feeb.DBTest do
   end
 
   describe "all/3" do
+    test ":__all templated query works", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      # There are 6 friends
+      assert [_, _, _, _, _, _] = DB.all(Friend)
+
+      %{id: 1, title: "My Post", body: "My Body"}
+      |> Post.new()
+      |> DB.insert!()
+
+      assert [%{id: 1, title: "My Post", body: "My Body"}] = DB.all(Post)
+    end
+
+    test ":__all templated query works with custom selection", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :write)
+
+      %{id: 1, title: "Post", body: "My Body"}
+      |> Post.new()
+      |> DB.insert!()
+
+      assert [%{id: 1, title: "Post", body: %NotLoaded{}}] = DB.all(Post, [], select: [:id, :title])
+    end
+
+    test "supports custom selection on user-defined queries", %{shard_id: shard_id} do
+      DB.begin(@context, shard_id, :read)
+
+      assert [%{id: %NotLoaded{}, name: "Phoebe"}] =
+               DB.all({:friends, :get_by_name}, "Phoebe", select: [:name])
+    end
+
     test "supports the :format flag", %{shard_id: shard_id} do
       DB.begin(@context, shard_id, :write)
 
@@ -530,12 +583,21 @@ defmodule Feeb.DBTest do
       assert [["{\"foo\":\"bar\"}"], ["{\"girl\":[\"so\",\"confusing\"]}"]] |> Enum.sort() ==
                DB.all({:all_types, :get_map}, [], format: :raw) |> Enum.sort()
 
-      # With the :type flag, we return the values formatted by their types _without_ the full schema
+      # With the :map flag, we return the values formatted by their types _without_ the full schema
       assert [%{map: %{girl: ["so", "confusing"]}}, %{map: %{foo: "bar"}}] |> Enum.sort() ==
-               DB.all({:all_types, :get_map}, [], format: :type) |> Enum.sort()
+               DB.all({:all_types, :get_map}, [], format: :map) |> Enum.sort()
 
       assert [%{atom: :i_am_atom, integer: 50}, %{atom: :other_atom, integer: -2}] |> Enum.sort() ==
-               DB.all({:all_types, :get_atom_and_integer}, [], format: :type) |> Enum.sort()
+               DB.all({:all_types, :get_atom_and_integer}, [], format: :map) |> Enum.sort()
+
+      # Custom selection with different formats
+      assert [%{name: "Phoebe"}] =
+               DB.all({:friends, :get_by_name}, "Phoebe", select: [:name], format: :map)
+
+      assert [["Joey"]] = DB.all({:friends, :get_by_name}, "Joey", select: [:name], format: :raw)
+
+      # No matching results
+      assert [] == DB.all({:friends, :get_by_name}, "Michael Scott", format: :map)
     end
   end
 

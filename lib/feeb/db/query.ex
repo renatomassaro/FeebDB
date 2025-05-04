@@ -33,24 +33,32 @@ defmodule Feeb.DB.Query do
   end
 
   @doc """
-  Compiling an adhoc query is useful when you want to select custom fields
-  off of a "select *" query. It's like a subset of the original query
+  Compiling an adhoc query is useful when the user wants to select custom fields off of a `SELECT *`
+  query. It's essentially a subset of the original query, with specific fields being selected.
   """
   @spec compile_adhoc_query(term, term) :: no_return
-  def compile_adhoc_query({context, domain, query_name} = query_id, custom_fields) do
-    raise "Deprecated; consider implementing this feature as part of `get_templated_query_id/3`"
-    query_name = :"#{query_name}$#{Enum.join(custom_fields, "$")}"
-    adhoc_query_id = {context, domain, query_name}
+  def compile_adhoc_query({context, domain, query_name} = original_query_id, target_fields) do
+    model = Schema.get_model_from_query_id(original_query_id)
+    valid_fields = model.__cols__()
+    sorted_target_fields = Enum.sort(target_fields)
 
-    {sql, {fields_bindings, params_bindings}, qt} = fetch!(query_id)
+    adhoc_query_name = :"#{query_name}$#{get_query_name_suffix(sorted_target_fields)}"
+    adhoc_query_id = {context, domain, adhoc_query_name}
+
+    {sql, {fields_bindings, params_bindings}, qt} = fetch!(original_query_id)
 
     if fields_bindings != [:*] do
-      raise "#{inspect(query_id)}: Custom fields can only be used on 'SELECT *' queries"
+      raise "#{inspect(original_query_id)}: Custom selection can only be used on 'SELECT *' queries"
     end
 
-    # "Compile" new query
-    new_sql = String.replace(sql, "*", Enum.join(custom_fields, ", "))
-    adhoc_q = {new_sql, {custom_fields, params_bindings}, qt}
+    Enum.each(target_fields, fn field ->
+      if field not in valid_fields,
+        do: raise("Can't select #{inspect(field)}; not a valid field for #{model}")
+    end)
+
+    # "Compile" new query (replaces `SELECT *` with `SELECT <sorted_target_fields>`)
+    new_sql = String.replace(sql, "*", Enum.join(sorted_target_fields, ", "), global: false)
+    adhoc_q = {new_sql, {sorted_target_fields, params_bindings}, qt}
 
     append_runtime_query(adhoc_query_id, adhoc_q)
     adhoc_query_id
@@ -58,11 +66,26 @@ defmodule Feeb.DB.Query do
 
   def get_templated_query_id(query_id, target_fields, meta \\ %{})
 
+  def get_templated_query_id({context, domain, query_name} = query_id, target_fields, _meta)
+      when query_name in [:__all, :__fetch] do
+    model = Schema.get_model_from_query_id(query_id)
+
+    real_query_id = {context, domain, :"#{query_name}$#{get_query_name_suffix(target_fields)}"}
+
+    case get(real_query_id) do
+      {_, _, _} = _compiled_query ->
+        real_query_id
+
+      nil ->
+        compile_templated_query(query_name, query_id, target_fields, model)
+    end
+  end
+
   def get_templated_query_id({context, domain, :__insert} = query_id, target_fields, _meta) do
     model = Schema.get_model_from_query_id(query_id)
 
     target_fields =
-      if target_fields == :all do
+      if target_fields == [:*] do
         model.__cols__()
       else
         raise "Not supported for now, add & test it once needed"
@@ -106,8 +129,7 @@ defmodule Feeb.DB.Query do
     end
   end
 
-  def get_templated_query_id({_context, _domain, query_name} = query_id, target_fields, _meta)
-      when query_name in [:__all, :__fetch, :__delete] do
+  def get_templated_query_id({_context, _domain, :__delete} = query_id, target_fields, _meta) do
     model = Schema.get_model_from_query_id(query_id)
 
     case get(query_id) do
@@ -115,7 +137,7 @@ defmodule Feeb.DB.Query do
         query_id
 
       nil ->
-        compile_templated_query(query_name, query_id, target_fields, model)
+        compile_templated_query(:__delete, query_id, target_fields, model)
     end
   end
 
@@ -139,34 +161,32 @@ defmodule Feeb.DB.Query do
     primary_keys = model.__primary_keys__()
     assert_adhoc_query!(primary_keys, query_id, model)
 
-    set_conditions =
-      target_fields
-      |> Enum.reduce([], fn field, acc ->
-        ["#{field} = ?" | acc]
-      end)
-      |> Enum.reverse()
-      |> Enum.join(", ")
+    set_clause = generate_update_set_clause(target_fields)
+    where_clause = generate_where_clause(primary_keys)
+    sql = "UPDATE #{domain} #{set_clause} #{where_clause};"
 
-    sql = "UPDATE #{domain} SET #{set_conditions} #{generate_where_clause(primary_keys)};"
     adhoc_query = {sql, {[], target_fields ++ primary_keys}, :update}
     append_runtime_query(query_id, adhoc_query)
 
     query_id
   end
 
-  defp compile_templated_query(:__all, {_, domain, _} = query_id, _target_fields, _model) do
-    sql = "SELECT * FROM #{domain};"
-    adhoc_query = {sql, {[:*], []}, :select}
+  defp compile_templated_query(:__all, {_, domain, _} = query_id, target_fields, model) do
+    sql = "#{generate_select_clause(target_fields, model)} FROM #{domain};"
+    adhoc_query = {sql, {target_fields, []}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
 
-  defp compile_templated_query(:__fetch, {_, domain, _} = query_id, _target_fields, model) do
+  defp compile_templated_query(:__fetch, {_, domain, _} = query_id, target_fields, model) do
     primary_keys = model.__primary_keys__()
     assert_adhoc_query!(primary_keys, query_id, model)
-    sql = "SELECT * FROM #{domain} #{generate_where_clause(primary_keys)};"
 
-    adhoc_query = {sql, {[:*], primary_keys}, :select}
+    select_clause = generate_select_clause(target_fields, model)
+    where_clause = generate_where_clause(primary_keys)
+    sql = "#{select_clause} FROM #{domain} #{where_clause};"
+
+    adhoc_query = {sql, {target_fields, primary_keys}, :select}
     append_runtime_query(query_id, adhoc_query)
     query_id
   end
@@ -232,6 +252,16 @@ defmodule Feeb.DB.Query do
     end
   end
 
+  defp get_query_name_suffix(target_fields) when is_list(target_fields) do
+    target_fields
+    |> Enum.sort()
+    |> Enum.reduce([], fn field, acc ->
+      ["#{field}" | acc]
+    end)
+    |> Enum.reverse()
+    |> Enum.join("$")
+  end
+
   defp maybe_inject_returning_clause(nil, _), do: nil
   defp maybe_inject_returning_clause(query, []), do: query
 
@@ -252,6 +282,37 @@ defmodule Feeb.DB.Query do
 
   defp get_returning_fields({_, _, operation}) when operation in [:update, :delete],
     do: "*"
+
+  defp generate_select_clause([:*], _), do: "SELECT *"
+
+  defp generate_select_clause(fields, model) when is_list(fields) do
+    valid_fields = model.__cols__()
+
+    select_conditions =
+      fields
+      |> Enum.reduce([], fn field, acc ->
+        if field not in valid_fields,
+          do: raise("Can't select #{inspect(field)}; not a valid field for #{model}")
+
+        ["#{field}" | acc]
+      end)
+      |> Enum.reverse()
+      |> Enum.join(", ")
+
+    "SELECT #{select_conditions}"
+  end
+
+  defp generate_update_set_clause(fields) when is_list(fields) do
+    set_conditions =
+      fields
+      |> Enum.reduce([], fn field, acc ->
+        ["#{field} = ?" | acc]
+      end)
+      |> Enum.reverse()
+      |> Enum.join(", ")
+
+    "SET #{set_conditions}"
+  end
 
   defp generate_where_clause(primary_keys) when is_list(primary_keys) do
     where_conditions =

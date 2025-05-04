@@ -1,7 +1,7 @@
 defmodule Feeb.DB.QueryTest do
   # Reason for `async: false`: this test suite interacts directly with the compiled queries cache.
   # While it's technically possible to adapt the cache to be per-test, I don't think it's worth the
-  # added complexity. As such, I'd rather have this test suite run separately from the rest.
+  # added complexity. As such, I'd rather have this test suite running separately from the rest.
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog
 
@@ -48,13 +48,55 @@ defmodule Feeb.DB.QueryTest do
     end
   end
 
+  describe "compile_adhoc_query/2" do
+    test "generates a subset of the original query" do
+      Query.compile(@all_types_path, {:test, :all_types})
+
+      original_query_id = {:test, :all_types, :get_by_integer}
+      query_id = Query.compile_adhoc_query(original_query_id, [:string, :atom, :uuid])
+
+      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id, [])
+      assert query_type == :select
+      assert target_fields == [:atom, :string, :uuid]
+      assert bindings == [:integer]
+      assert sql == "select atom, string, uuid from all_types where integer = ?;"
+    end
+
+    test "raises on custom selection of a non-wildcard select query" do
+      Query.compile(@all_types_path, {:test, :all_types})
+
+      # This query is: `SELECT atom, integer FROM all_types;`
+      original_query_id = {:test, :all_types, :get_atom_and_integer}
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          Query.compile_adhoc_query(original_query_id, [:string, :atom, :uuid])
+        end
+
+      assert error =~ "Custom selection can only be used on 'SELECT *' queries"
+    end
+
+    test "raises when trying to select a field that does not exist in the schema" do
+      Query.compile(@all_types_path, {:test, :all_types})
+
+      original_query_id = {:test, :all_types, :get_by_integer}
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          Query.compile_adhoc_query(original_query_id, [:string, :i_dont_exist, :atom])
+        end
+
+      assert error =~ "Can't select :i_dont_exist; not a valid field for Elixir.Sample.AllTypes"
+    end
+  end
+
   describe "get_templated_query_id/3" do
     test ":__all" do
       Query.compile(@friends_path, {:test, :friends})
 
       # Ensures the :__fetch is compiled (due to it being an "ad-hoc" query)
       query_id = {:test, :friends, :__all}
-      Query.get_templated_query_id(query_id, [])
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
@@ -63,11 +105,23 @@ defmodule Feeb.DB.QueryTest do
       assert sql == "SELECT * FROM friends;"
     end
 
+    test ":__all - with custom target fields" do
+      Query.compile(@friends_path, {:test, :friends})
+
+      query_id = Query.get_templated_query_id({:test, :friends, :__all}, [:name])
+
+      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert query_type == :select
+      assert target_fields == [:name]
+      assert bindings == []
+      assert sql == "SELECT name FROM friends;"
+    end
+
     test ":__fetch" do
       Query.compile(@friends_path, {:test, :friends})
 
       query_id = {:test, :friends, :__fetch}
-      Query.get_templated_query_id(query_id, [])
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
@@ -80,13 +134,36 @@ defmodule Feeb.DB.QueryTest do
       Query.compile(@order_items_path, {:test, :order_items})
 
       query_id = {:test, :order_items, :__fetch}
-      Query.get_templated_query_id(query_id, [])
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:*]
       assert bindings == [:order_id, :product_id]
       assert sql == "SELECT * FROM order_items WHERE order_id = ? AND product_id = ?;"
+    end
+
+    test ":__fetch - with custom target fields" do
+      Query.compile(@order_items_path, {:test, :order_items})
+
+      query_id = Query.get_templated_query_id({:test, :order_items, :__fetch}, [:quantity, :price])
+
+      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert sql == "SELECT quantity, price FROM order_items WHERE order_id = ? AND product_id = ?;"
+      assert target_fields == [:quantity, :price]
+      assert bindings == [:order_id, :product_id]
+      assert query_type == :select
+    end
+
+    test ":__fetch - raises when invalid fields are selected" do
+      Query.compile(@order_items_path, {:test, :order_items})
+
+      %{message: error} =
+        assert_raise RuntimeError, fn ->
+          Query.get_templated_query_id({:test, :order_items, :__fetch}, [:i_dont_exist])
+        end
+
+      assert error =~ "Can't select :i_dont_exist; not a valid field for Elixir.Sample.OrderItems"
     end
 
     test ":__fetch - raises when schema has no PK" do
@@ -96,7 +173,7 @@ defmodule Feeb.DB.QueryTest do
 
       %{message: error} =
         assert_raise RuntimeError, fn ->
-          Query.get_templated_query_id(query_id, [])
+          Query.get_templated_query_id(query_id, [:*])
         end
 
       assert error =~ "Can't generate adhoc query"
@@ -108,7 +185,7 @@ defmodule Feeb.DB.QueryTest do
       Query.compile(@friends_path, {:test, :friends})
 
       query_id = {:test, :friends, :__insert}
-      Query.get_templated_query_id(query_id, :all)
+      Query.get_templated_query_id(query_id, [:*])
 
       assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :insert
