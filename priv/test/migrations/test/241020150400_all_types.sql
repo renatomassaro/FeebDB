@@ -30,5 +30,6 @@ CREATE TABLE all_types (
   list_nullable TEXT,
   enum TEXT,
   enum_nullable TEXT,
-  enum_safe_atom TEXT
+  enum_safe_atom TEXT,
+  enum_fn TEXT
 ) STRICT;

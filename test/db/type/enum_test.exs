@@ -7,21 +7,24 @@ defmodule Feeb.DB.Type.EnumTest do
 
   describe "enum type" do
     test "stores and loads correctly", %{shard_id: shard_id} do
-      params = AllTypes.creation_params(%{enum: :one, enum_nullable: "baz"})
+      params = AllTypes.creation_params(%{enum: :one, enum_nullable: "baz", enum_fn: :function})
 
       # Enums are correctly casted
       all_types = AllTypes.new(params)
       assert all_types.enum == :one
       assert all_types.enum_nullable == "baz"
+      assert all_types.enum_fn == :function
 
       # Enums are correctly dumped and loaded
       DB.begin(@context, shard_id, :write)
       assert {:ok, db_all_types} = DB.insert(all_types)
       assert db_all_types.enum == :one
       assert db_all_types.enum_nullable == "baz"
+      assert db_all_types.enum_fn == :function
 
       # Values are stored as text in the database
-      assert [["one", "baz"]] == DB.raw!("select enum, enum_nullable from all_types")
+      assert [["one", "baz", "function"]] ==
+               DB.raw!("select enum, enum_nullable, enum_fn from all_types")
     end
 
     test "crashes if input is not a possible enum value" do
@@ -227,6 +230,23 @@ defmodule Feeb.DB.Type.EnumTest do
         end
 
       assert error =~ "Multiple types in enum"
+    end
+
+    test "supports a function as value generator" do
+      atom_values_fn = fn -> [:a, :b, :c] end
+      str_values_fn = fn -> ["x", "y", "z"] end
+
+      opts = DB.Type.Enum.overwrite_opts(%{values: atom_values_fn, format: :safe_atom}, nil, nil)
+      assert opts.values == [:a, :b, :c]
+      assert opts.format == :safe_atom
+
+      opts = DB.Type.Enum.overwrite_opts(%{values: atom_values_fn}, nil, nil)
+      assert opts.values == [:a, :b, :c]
+      assert opts.format == :atom
+
+      opts = DB.Type.Enum.overwrite_opts(%{values: str_values_fn}, nil, nil)
+      assert opts.values == ["x", "y", "z"]
+      assert opts.format == :string
     end
   end
 end
