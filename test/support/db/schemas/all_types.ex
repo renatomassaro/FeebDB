@@ -36,6 +36,7 @@ defmodule Sample.AllTypes do
     {:enum, {:enum, values: [:one, :two, :three]}},
     {:enum_nullable, {:enum, values: ["foo", "bar", "baz"], nullable: true}},
     {:enum_safe_atom, {:enum, values: [:safe, :atom], format: :safe_atom, nullable: true}},
+    {:enum_fn, {:enum, values: fn -> [:from, :a, :function] end, nullable: true}},
     {:virtual, {:integer, virtual: true}},
     {:virtual_with_after_read, {:integer, virtual: true, after_read: :load_virtual_integer}}
   ]

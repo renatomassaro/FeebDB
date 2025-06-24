@@ -59,7 +59,8 @@ defmodule DB.SchemaTest do
                :list_nullable,
                :enum,
                :enum_nullable,
-               :enum_safe_atom
+               :enum_safe_atom,
+               :enum_fn
              ] == AllTypes.__cols__()
     end
   end

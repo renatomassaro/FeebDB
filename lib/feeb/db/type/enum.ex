@@ -9,13 +9,19 @@ defmodule Feeb.DB.Type.Enum do
   If a valid `format` is specified, keep as is. However, if one was not specified by the user, infer
   it based on the contents of the `values` entry. We assume all entries within `values` will share
   the same type (and we will crash otherwise).
+
+  We accept `values` being a function, as long as it is a function that returns a list. This might
+  be useful if the application wants to avoid transitive compile-time dependencies.
   """
+  def overwrite_opts(%{values: values_fn} = opts, mod, identifier) when is_function(values_fn),
+    do: overwrite_opts(%{opts | values: values_fn.()}, mod, identifier)
+
   def overwrite_opts(%{format: format} = opts, _, _) do
     true = format in [:atom, :safe_atom, :string]
     opts
   end
 
-  def overwrite_opts(%{values: values} = opts, _, identifier) do
+  def overwrite_opts(%{values: values} = opts, _, identifier) when is_list(values) do
     value_types =
       values
       |> Enum.map(fn value ->
