@@ -54,10 +54,10 @@ defmodule Feeb.DB.Mixfile do
 
   def deps do
     [
-      {:exqlite, "~> 0.23"},
+      {:exqlite, "~> 0.33"},
       {:stack, "~> 1.0"},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
-      {:excoveralls, "~> 0.18.2", only: :test},
+      {:excoveralls, "~> 0.18.5", only: :test},
       {:mix_test_watch, "~> 1.2", only: [:dev, :test], runtime: false},
       {:mox, "~> 1.1", only: :test}
     ]

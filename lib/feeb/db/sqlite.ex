@@ -4,6 +4,8 @@ defmodule Feeb.DB.SQLite do
     - List of error codes and their meaning: https://www.sqlite.org/rescode.html
   """
 
+  require Logger
+
   alias Exqlite.Sqlite3, as: Driver
 
   @type conn :: reference()
@@ -39,8 +41,15 @@ defmodule Feeb.DB.SQLite do
   def bind(_, _, []),
     do: :ok
 
-  def bind(conn, stmt, bindings) when is_list(bindings),
-    do: Driver.bind(conn, stmt, bindings)
+  def bind(stmt, bindings) when is_list(bindings) do
+    try do
+      Driver.bind(stmt, bindings)
+    rescue
+      e in ArgumentError ->
+        Logger.error(e)
+        {:error, :arguments_wrong_length}
+    end
+  end
 
   @doc """
   Convenience wrapper for functions that do not expect a return value

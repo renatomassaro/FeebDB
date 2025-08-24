@@ -236,7 +236,7 @@ defmodule Feeb.DB.Repo do
 
     with {:ok, {stmt, stmt_sql}} <- prepare_query(state, query_id, sql),
          true = stmt_sql == sql,
-         :ok <- SQLite.bind(state.conn, stmt, bindings_values),
+         :ok <- SQLite.bind(stmt, bindings_values),
          {:ok, rows} <- SQLite.all(state.conn, stmt) do
       attrs = %{
         format: opts[:format] || :schema,
@@ -258,7 +258,7 @@ defmodule Feeb.DB.Repo do
     raise "Remove or document usage"
 
     with {:ok, stmt} <- SQLite.prepare(state.conn, raw_sql),
-         :ok <- SQLite.bind(state.conn, stmt, bindings_values),
+         :ok <- SQLite.bind(stmt, bindings_values),
          {:ok, rows} <- SQLite.all(state.conn, stmt) do
       schema = Keyword.fetch!(opts, :schema)
       result = format_custom(:all, schema, rows)

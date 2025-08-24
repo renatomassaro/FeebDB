@@ -19,29 +19,29 @@ defmodule Feeb.DB.SQLiteTest do
   describe "bind/3" do
     test "binds variables to a prepared statement", %{c: c} do
       {:ok, stmt} = SQLite.prepare(c, "SELECT * FROM friends WHERE id = ?")
-      assert :ok = SQLite.bind(c, stmt, [1])
+      assert :ok = SQLite.bind(stmt, [1])
       {:ok, stmt} = SQLite.prepare(c, "BEGIN")
-      assert :ok = SQLite.bind(c, stmt, [])
+      assert :ok = SQLite.bind(stmt, [])
     end
 
+    @tag :capture_log
     test "fails when the number of arguments is wrong", %{c: c} do
       {:ok, stmt} = SQLite.prepare(c, "SELECT * FROM friends WHERE id = ?")
-      assert {:error, :arguments_wrong_length} = SQLite.bind(c, stmt, [1, 2, 3])
-      # I *can* bind an empty list though
-      assert :ok = SQLite.bind(c, stmt, [])
+      assert {:error, :arguments_wrong_length} = SQLite.bind(stmt, [1, 2, 3])
+      assert {:error, :arguments_wrong_length} = SQLite.bind(stmt, [])
     end
   end
 
   describe "one/2" do
     test "returns an entry if found", %{c: c} do
       {:ok, stmt} = SQLite.prepare(c, "SELECT * FROM friends WHERE id = ?")
-      :ok = SQLite.bind(c, stmt, [1])
+      :ok = SQLite.bind(stmt, [1])
       assert {:ok, [1, "Phoebe", nil]} == SQLite.one(c, stmt)
     end
 
     test "returns nil if not found", %{c: c} do
       {:ok, stmt} = SQLite.prepare(c, "SELECT * FROM friends WHERE id = ?")
-      :ok = SQLite.bind(c, stmt, [999])
+      :ok = SQLite.bind(stmt, [999])
       assert {:ok, nil} == SQLite.one(c, stmt)
     end
 
@@ -99,7 +99,7 @@ defmodule Feeb.DB.SQLiteTest do
       # No results here
       {:ok, stmt} = SQLite.prepare(c, "UPDATE friends SET name = ? WHERE id = ?")
 
-      SQLite.bind(c, stmt, ["Jessie", 1])
+      SQLite.bind(stmt, ["Jessie", 1])
       assert :ok = SQLite.perform(c, stmt)
 
       # But the update did go through
