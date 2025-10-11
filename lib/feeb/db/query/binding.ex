@@ -42,12 +42,12 @@ defmodule Feeb.DB.Query.Binding do
 
   defp parse_kv(sql) do
     sql
-    |> String.split(" = ?")
+    |> String.split(" ?")
     |> List.delete_at(-1)
     |> Enum.map(fn expr ->
       expr
       |> String.split(" ")
-      |> Enum.at(-1)
+      |> Enum.at(-2)
       |> String.to_atom()
     end)
   end
