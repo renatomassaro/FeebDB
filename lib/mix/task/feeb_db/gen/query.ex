@@ -3,6 +3,8 @@ defmodule Mix.Tasks.FeebDb.Gen.Query do
   require Logger
   alias Feeb.DB.Config
 
+  @requirements ["app.config"]
+
   @file_adapter Application.compile_env(:feebdb, :adapters)[:file] || Feeb.Adapters.File
 
   @option_parser_opts [

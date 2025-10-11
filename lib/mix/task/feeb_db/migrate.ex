@@ -3,6 +3,8 @@ defmodule Mix.Tasks.FeebDb.Migrate do
   require Logger
   alias Feeb.DB.{Boot, Repo}
 
+  @requirements ["app.config"]
+
   @impl Mix.Task
   def run(_args) do
     Repo.Manager.Supervisor.start_link([])
