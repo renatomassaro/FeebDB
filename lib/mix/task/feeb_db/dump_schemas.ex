@@ -2,6 +2,8 @@ defmodule Mix.Tasks.FeebDb.DumpSchemas do
   use Mix.Task
   alias Feeb.DB.{Migrator, SQLite}
 
+  @requirements ["app.config"]
+
   # TODO: Get these paths from args instead of hard-coding them here
   @tmp_db "/tmp/helix_tmp_dump.db"
   @output_path "priv/schemas"
