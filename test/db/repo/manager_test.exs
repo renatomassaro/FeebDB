@@ -1,7 +1,7 @@
 defmodule Feeb.DB.Repo.ManagerTest do
   use Test.Feeb.DBCase, async: true
 
-  alias Feeb.DB.{Config}
+  alias Feeb.DB.{Config, Repo}
   alias Feeb.DB.Repo.Manager
 
   @context :test
@@ -331,7 +331,7 @@ defmodule Feeb.DB.Repo.ManagerTest do
       assert {:ok, repo} = Manager.fetch_connection(manager, :write, timeout: 25)
 
       # The leasee actually started a DB transaction
-      assert :ok == GenServer.call(repo, {:begin, :exclusive})
+      assert :ok == Repo.begin(repo, :exclusive)
 
       # And there is a `transaction_id` reference in the Repo state
       repo_state = :sys.get_state(repo)
