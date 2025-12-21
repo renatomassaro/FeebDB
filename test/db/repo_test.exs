@@ -1,7 +1,6 @@
 defmodule Feeb.DB.RepoTest do
   use Test.Feeb.DBCase, async: true
 
-  alias GenServer, as: GS
   alias Feeb.DB.{Config, Repo, SQLite}
 
   @context :test
@@ -87,11 +86,11 @@ defmodule Feeb.DB.RepoTest do
       refute :sys.get_state(repo).transaction_id
 
       # Now we are in a transaction
-      assert :ok == GS.call(repo, {:begin, :exclusive})
+      assert :ok == Repo.begin(repo, :exclusive)
       assert :sys.get_state(repo).transaction_id
 
       # No longer in a transaction once we commit
-      assert :ok == GS.call(repo, {:commit})
+      assert :ok == Repo.commit(repo)
       refute :sys.get_state(repo).transaction_id
 
       # Proof that we are no longer in a transaction: rollback won't work
@@ -101,10 +100,9 @@ defmodule Feeb.DB.RepoTest do
 
     @tag capture_log: true
     test "can't BEGIN twice", %{repo: repo} do
-      assert :ok == GS.call(repo, {:begin, :deferred})
+      assert :ok == Repo.begin(repo, :deferred)
 
-      assert {:error, :already_in_transaction} ==
-               GS.call(repo, {:begin, :exclusive})
+      assert {:error, :already_in_transaction} == Repo.begin(repo, :exclusive)
 
       # Proof that we are in a transaction: we can rollback (only once, of course)
       c = :sys.get_state(repo).conn
@@ -114,11 +112,11 @@ defmodule Feeb.DB.RepoTest do
 
     @tag capture_log: true
     test "can't COMMIT when not in a transaction", %{repo: repo} do
-      assert {:error, :not_in_transaction} == GS.call(repo, {:commit})
+      assert {:error, :not_in_transaction} == Repo.commit(repo)
 
-      assert :ok == GS.call(repo, {:begin, :deferred})
-      assert :ok == GS.call(repo, {:commit})
-      assert {:error, :not_in_transaction} == GS.call(repo, {:commit})
+      assert :ok == Repo.begin(repo, :deferred)
+      assert :ok == Repo.commit(repo)
+      assert {:error, :not_in_transaction} == Repo.commit(repo)
     end
   end
 
@@ -126,33 +124,31 @@ defmodule Feeb.DB.RepoTest do
     test "returns the corresponding result", %{repo: repo} do
       q = {:friends, :get_by_id}
 
-      assert {:ok, %{id: 1, name: "Phoebe"}} = GS.call(repo, {:query, :one, q, [1], []})
+      assert {:ok, %{id: 1, name: "Phoebe"}} = Repo.one(repo, q, [1], [])
 
-      assert {:ok, nil} == GS.call(repo, {:query, :one, q, [9], []})
+      assert {:ok, nil} == Repo.one(repo, q, [9], [])
     end
 
     @tag capture_log: true
     test "handles errors", %{repo: repo} do
       # Multiple results being returned at once
-      assert {:error, :multiple_results} =
-               GS.call(repo, {:query, :one, {:friends, :get_all}, [], []})
+      assert {:error, :multiple_results} = Repo.one(repo, {:friends, :get_all}, [], [])
 
       # Wrong number of bindings
-      assert {:error, :arguments_wrong_length} =
-               GS.call(repo, {:query, :one, {:friends, :get_by_id}, [1, 2], []})
+      assert {:error, :arguments_wrong_length} = Repo.one(repo, {:friends, :get_by_id}, [1, 2], [])
     end
   end
 
   describe "handle_call: raw" do
     @tag capture_log: true
     test "executes raw queries", %{repo: repo} do
-      assert {:ok, rows} = GS.call(repo, {:raw, "select * from friends", []})
+      assert {:ok, rows} = Repo.raw(repo, "select * from friends", [])
       assert length(rows) == 6
 
       # Now with bindings
-      assert {:ok, _} = GS.call(repo, {:raw, "delete from friends where id = ?", [1]})
+      assert {:ok, _} = Repo.raw(repo, "delete from friends where id = ?", [1])
 
-      assert {:ok, rows} = GS.call(repo, {:raw, "select * from friends", []})
+      assert {:ok, rows} = Repo.raw(repo, "select * from friends", [])
       assert length(rows) == 5
     end
 
@@ -161,7 +157,7 @@ defmodule Feeb.DB.RepoTest do
 
       log =
         capture_log(fn ->
-          assert {:ok, _} = GS.call(repo, {:raw, "select * from friends", []})
+          assert {:ok, _} = Repo.raw(repo, "select * from friends", [])
         end)
 
       assert log =~ "warning"
@@ -171,32 +167,30 @@ defmodule Feeb.DB.RepoTest do
 
   describe "handle_call: close" do
     test "closes the connection and kills the server", %{repo: repo} do
-      assert :ok == GS.call(repo, {:close})
+      assert :ok == Repo.close(repo)
       # Process is dead
       refute Process.alive?(repo)
     end
 
     test "can't close the connection while in a transaction", %{repo: repo} do
       # We are in a transaction
-      assert :ok == GS.call(repo, {:begin, :exclusive})
+      assert :ok == Repo.begin(repo, :exclusive)
       assert :sys.get_state(repo).transaction_id
 
       # Can't close this
       log =
         capture_log(fn ->
-          assert {:error, :cant_close_with_transaction} ==
-                   GS.call(repo, {:close})
-
+          assert {:error, :cant_close_with_transaction} == Repo.close(repo)
           assert Process.alive?(repo)
         end)
 
       assert log =~ "[error] Tried to close a Repo while in a transaction"
 
       # But once we commit...
-      assert :ok == GS.call(repo, {:commit})
+      assert :ok == Repo.commit(repo)
 
       # We can close it
-      assert :ok == GS.call(repo, {:close})
+      assert :ok == Repo.close(repo)
       refute Process.alive?(repo)
     end
   end
@@ -204,15 +198,15 @@ defmodule Feeb.DB.RepoTest do
   describe "handle_call: mgt_connection_released" do
     test "performs a no-op on the regular lifecycle", %{repo: repo} do
       # This Repo had a regular lifecycle: it started a transaction
-      assert :ok == GS.call(repo, {:begin, :exclusive})
+      assert :ok == Repo.begin(repo, :exclusive)
       assert :sys.get_state(repo).transaction_id
 
       # And then it committed, which resets the transaction_id
-      assert :ok == GS.call(repo, {:commit})
+      assert :ok == Repo.commit(repo)
       state_after_commit = :sys.get_state(repo)
       refute state_after_commit.transaction_id
 
-      assert :ok == GS.call(repo, {:mgt_connection_released})
+      assert :ok == Repo.notify_release(repo)
       state_after_release = :sys.get_state(repo)
 
       # Nothing changes when the connection is released
@@ -221,12 +215,12 @@ defmodule Feeb.DB.RepoTest do
 
     test "rolls back transaction if one exists", %{repo: repo} do
       # We are in a transaction
-      assert :ok == GS.call(repo, {:begin, :exclusive})
+      assert :ok == Repo.begin(repo, :exclusive)
       assert :sys.get_state(repo).transaction_id
 
       # Let's assume mgt_connection_released was called with an active transaction -- that means the
       # caller was forced to end its connection (e.g. due to timeout or caller dying)
-      assert :ok == GS.call(repo, {:mgt_connection_released})
+      assert :ok == Repo.notify_release(repo)
       refute :sys.get_state(repo).transaction_id
 
       # If we try to ROLLBACK, SQLite yells at us saying there's no open transaction
@@ -239,11 +233,11 @@ defmodule Feeb.DB.RepoTest do
       assert {:ok, repo} = Repo.start_link({@context, shard_id, db, :readwrite, self()})
 
       # It works if called from the same process (here, test process == manager process)
-      assert :ok == GS.call(repo, {:mgt_connection_released})
+      assert :ok == Repo.notify_release(repo)
 
       # It blows up if called from elsewhere
       spawn(fn ->
-        GS.call(repo, {:mgt_connection_released})
+        Repo.notify_release(repo)
         block_forever()
       end)
 

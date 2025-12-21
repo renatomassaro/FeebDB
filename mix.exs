@@ -30,7 +30,7 @@ defmodule Feeb.DB.Mixfile do
   def application do
     [
       env: [],
-      mod: {Feeb.DB.Application, []}
+      mod: []
     ]
   end
 
@@ -56,6 +56,7 @@ defmodule Feeb.DB.Mixfile do
     [
       {:exqlite, "~> 0.33"},
       {:stack, "~> 1.0"},
+      {:telemetry, "~> 1.3"},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:excoveralls, "~> 0.18.5", only: :test},
       {:mix_test_watch, "~> 1.2", only: [:dev, :test], runtime: false},

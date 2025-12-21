@@ -28,7 +28,7 @@ defmodule Feeb.DB do
 
     # We can't BEGIN EXCLUSIVE in a read-only database
     txn_type = if(access_type == :read, do: :deferred, else: transaction_type)
-    :ok = GenServer.call(get_pid!(), {:begin, txn_type})
+    :ok = Repo.begin(get_pid!(), txn_type)
   end
 
   @doc """
@@ -58,9 +58,7 @@ defmodule Feeb.DB do
   It will also release the lock in the Repo connection, allowing other processes to grab it.
   """
   def commit do
-    :ok = GenServer.call(get_pid!(), {:commit})
-    # TODO: Close via repomanager
-    # :ok = GenServer.call(get_pid!(), {:close})
+    :ok = Repo.commit(get_pid!())
     delete_env()
     :ok
   end
@@ -71,7 +69,7 @@ defmodule Feeb.DB do
   It will also release the lock in the Repo connection, allowing other processes to grab it.
   """
   def rollback do
-    :ok = GenServer.call(get_pid!(), {:rollback})
+    :ok = Repo.rollback(get_pid!())
     delete_env()
     :ok
   end
@@ -81,17 +79,12 @@ defmodule Feeb.DB do
   ##################################################################################################
 
   def raw(sql, bindings \\ []) do
-    GenServer.call(get_pid!(), {:raw, sql, bindings})
+    Repo.raw(get_pid!(), sql, bindings)
   end
 
   def raw!(sql, bindings \\ []) do
     {:ok, r} = raw(sql, bindings)
     r
-  end
-
-  def prepared_raw(sql, bindings, schema) do
-    opts = [schema: schema]
-    GenServer.call(get_pid!(), {:prepared_raw, sql, bindings, opts})
   end
 
   def one(partial_or_full_query_id, bindings \\ [], opts \\ [])
@@ -115,7 +108,7 @@ defmodule Feeb.DB do
   def one({domain, query_name}, value, opts), do: one({domain, query_name}, [value], opts)
 
   def one({_, domain, query_name}, bindings, opts) when is_list(bindings) do
-    case GenServer.call(get_pid!(), {:query, :one, {domain, query_name}, bindings, opts}) do
+    case Repo.one(get_pid!(), {domain, query_name}, bindings, opts) do
       {:ok, r} -> r
       {:error, :multiple_results} -> raise "MultipleResultsError"
     end
@@ -146,7 +139,7 @@ defmodule Feeb.DB do
   def all({domain, query_name}, value, opts), do: all({domain, query_name}, [value], opts)
 
   def all({_, domain, query_name}, bindings, opts) do
-    case GenServer.call(get_pid!(), {:query, :all, {domain, query_name}, bindings, opts}) do
+    case Repo.all(get_pid!(), {domain, query_name}, bindings, opts) do
       {:ok, rows} -> rows
       {:error, reason} -> raise reason
     end
@@ -169,7 +162,7 @@ defmodule Feeb.DB do
 
     if struct.__meta__.valid? do
       bindings = get_bindings(full_query_id, struct)
-      GenServer.call(get_pid!(), {:query, :insert, {domain, query_name}, bindings, opts})
+      Repo.insert(get_pid!(), {domain, query_name}, bindings, opts)
     else
       {:error, "Cast error: #{inspect(struct.__meta__.errors)}"}
     end
@@ -191,7 +184,7 @@ defmodule Feeb.DB do
     true = :db == struct.__meta__.origin
 
     bindings = get_bindings(full_query_id, struct)
-    GenServer.call(get_pid!(), {:query, :update, {domain, query_name}, bindings, opts})
+    Repo.update(get_pid!(), {domain, query_name}, bindings, opts)
   end
 
   def update_all(partial_or_full_query_id, bindings, opts \\ [])
@@ -201,7 +194,7 @@ defmodule Feeb.DB do
   end
 
   def update_all({_, domain, query_name}, bindings, opts) do
-    GenServer.call(get_pid!(), {:query, :update_all, {domain, query_name}, bindings, opts})
+    Repo.update_all(get_pid!(), {domain, query_name}, bindings, opts)
   end
 
   def update_all!(query_id, params, opts \\ []) do
@@ -225,7 +218,7 @@ defmodule Feeb.DB do
     true = :db == struct.__meta__.origin
 
     bindings = get_bindings(full_query_id, struct)
-    GenServer.call(get_pid!(), {:query, :delete, {domain, query_name}, bindings, opts})
+    Repo.delete(get_pid!(), {domain, query_name}, bindings, opts)
   end
 
   def delete_all(partial_or_full_query_id, bindings, opts \\ [])
@@ -235,7 +228,7 @@ defmodule Feeb.DB do
   end
 
   def delete_all({_, domain, query_name}, bindings, opts) do
-    GenServer.call(get_pid!(), {:query, :delete_all, {domain, query_name}, bindings, opts})
+    Repo.delete_all(get_pid!(), {domain, query_name}, bindings, opts)
   end
 
   def delete_all!(query_id, params, opts \\ []) do
@@ -274,6 +267,7 @@ defmodule Feeb.DB do
   ##################################################################################################
 
   defp setup_env(context, shard_id, type, opts) when type in [:write, :read] do
+    # TODO: shard-aware telemetry
     {:ok, manager_pid} = Repo.Manager.Registry.fetch_or_create(context, shard_id)
     {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type, opts)
 

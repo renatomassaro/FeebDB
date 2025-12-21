@@ -1,3 +1,5 @@
+Feeb.DB.Supervisor.start_link([])
+
 Test.Feeb.DB.on_start()
 
 ExUnit.start()

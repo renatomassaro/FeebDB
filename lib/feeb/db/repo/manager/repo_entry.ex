@@ -1,6 +1,6 @@
 defmodule Feeb.DB.Repo.Manager.RepoEntry do
   @enforce_keys [:busy?]
-  defstruct [:pid, :caller_pid, :timer_ref, :monitor_ref, busy?: false]
+  defstruct [:pid, :caller_pid, :time, :timer_ref, :monitor_ref, busy?: false]
 
   @doc """
   Creates an initial RepoEntry
@@ -20,6 +20,7 @@ defmodule Feeb.DB.Repo.Manager.RepoEntry do
     %__MODULE__{
       pid: pid,
       busy?: true,
+      time: System.system_time(:millisecond),
       caller_pid: caller_pid,
       monitor_ref: monitor_ref,
       timer_ref: timer_ref

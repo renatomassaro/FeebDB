@@ -81,6 +81,8 @@ defmodule Feeb.DB.Repo.Manager do
   # Server API
 
   def init({context, shard_id}) do
+    Logger.metadata(context: context, shard_id: shard_id)
+
     Logger.info("Starting repo manager for shard #{shard_id} #{inspect(self())}")
 
     state = %__MODULE__{
@@ -246,11 +248,11 @@ defmodule Feeb.DB.Repo.Manager do
       {:ok, key} ->
         repo_entry = fetch_repo_entry!(state, key)
 
-        # Stop monitoring the caller process since it released the connection
-        Process.demonitor(repo_entry.monitor_ref)
-
         # Stop the repo_timeout timer
         stop_timer(repo_entry.timer_ref)
+
+        # Stop monitoring the caller process since it released the connection
+        Process.demonitor(repo_entry.monitor_ref)
 
         # Notify the Repo that it's been released
         :ok = Repo.notify_release(pid)

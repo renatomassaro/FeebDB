@@ -1,9 +1,6 @@
 defmodule Feeb.DB.Repo do
   @moduledoc false
 
-  # This can be removed once the usage of `DB.prepared_raw/3` is consolidated
-  @dialyzer {:nowarn_function, format_custom: 3}
-
   @struct_keys [:manager_pid, :context, :shard_id, :mode, :path, :conn, :transaction_id]
   @enforce_keys List.delete(@struct_keys, [:transaction_id])
   defstruct @struct_keys
@@ -25,6 +22,55 @@ defmodule Feeb.DB.Repo do
   def start_link({_, _, _, _, _} = args),
     do: GenServer.start_link(__MODULE__, args)
 
+  def begin(pid, txn_type) do
+    with_telemetry(
+      :begin,
+      fn ->
+        GenServer.call(pid, {:begin, txn_type, Logger.metadata()})
+      end,
+      %{type: txn_type}
+    )
+  end
+
+  def commit(pid) do
+    with_telemetry(:commit, fn -> GenServer.call(pid, {:commit, Logger.metadata()}) end)
+  end
+
+  def rollback(pid) do
+    with_telemetry(:rollback, fn ->
+      GenServer.call(pid, {:rollback, Logger.metadata()})
+    end)
+  end
+
+  def one(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:one, pid, {domain, query_name}, bindings, opts)
+
+  def all(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:all, pid, {domain, query_name}, bindings, opts)
+
+  def insert(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:insert, pid, {domain, query_name}, bindings, opts)
+
+  def update(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:update, pid, {domain, query_name}, bindings, opts)
+
+  def update_all(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:update_all, pid, {domain, query_name}, bindings, opts)
+
+  def delete(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:delete, pid, {domain, query_name}, bindings, opts)
+
+  def delete_all(pid, {domain, query_name}, bindings, opts),
+    do: run_query(:delete_all, pid, {domain, query_name}, bindings, opts)
+
+  def raw(pid, sql, bindings) do
+    with_telemetry(
+      :query,
+      fn -> GenServer.call(pid, {:raw, sql, bindings}) end,
+      %{query_type: :raw}
+    )
+  end
+
   def close(pid),
     do: GenServer.call(pid, {:close})
 
@@ -35,9 +81,49 @@ defmodule Feeb.DB.Repo do
   def notify_release(pid),
     do: GenServer.call(pid, {:mgt_connection_released})
 
+  defp run_query(query_type, pid, {domain, query_name}, bindings, opts) do
+    with_telemetry(
+      :query,
+      fn ->
+        GenServer.call(
+          pid,
+          {:query, query_type, {domain, query_name}, bindings, opts, Logger.metadata()}
+        )
+      end,
+      %{query_type: query_type, domain: domain, query_name: query_name}
+    )
+  end
+
+  defp with_telemetry(name, cb, attrs \\ %{}) do
+    start = System.monotonic_time()
+    :telemetry.execute([:feebdb, name, :start], %{}, attrs)
+
+    try do
+      result = cb.()
+
+      :telemetry.execute(
+        [:feebdb, name, :stop],
+        %{duration: System.monotonic_time() - start},
+        attrs
+      )
+
+      result
+    catch
+      kind, reason ->
+        :telemetry.execute(
+          [:feebdb, name, :exception],
+          %{duration: System.monotonic_time() - start},
+          Map.merge(attrs, %{kind: kind, reason: reason, stacktrace: __STACKTRACE__})
+        )
+
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
   # Server API
 
   def init({context, shard_id, path, mode, manager_pid}) do
+    Logger.metadata(context: context, shard_id: shard_id, path: path, mode: mode)
     Logger.info("Starting #{mode} repo for shard #{shard_id}@#{context}")
     true = mode in [:readwrite, :readonly]
 
@@ -169,70 +255,90 @@ defmodule Feeb.DB.Repo do
   end
 
   # BEGIN
-  def handle_call({:begin, txn_type}, _from, %{transaction_id: nil} = state) do
+  def handle_call({:begin, txn_type, log_meta}, _from, %{transaction_id: nil} = state) do
+    start_custom_log_metadata_scope(log_meta)
+    Logger.debug("BEGIN")
+
     {sql, _, _} = Query.fetch!({:begin, txn_type})
 
     case SQLite.exec(state.conn, sql) do
       :ok ->
         txn_id = gen_transaction_id()
+        end_custom_log_metadata_scope()
         {:reply, :ok, %{state | transaction_id: txn_id}}
 
       {:error, r} ->
+        Logger.error("Unable to BEGIN: #{inspect(r)}")
+        end_custom_log_metadata_scope()
         {:reply, {:error, r}, state}
     end
   end
 
-  def handle_call({:begin, _type}, _from, state) do
-    Logger.error("Tried to BEGIN when already in a transaction")
+  def handle_call({:begin, _type, log_meta}, _from, state) do
+    Logger.error("Tried to BEGIN when already in a transaction", log_meta)
     {:reply, {:error, :already_in_transaction}, state}
   end
 
   # COMMIT
-  def handle_call({:commit}, _from, %{transaction_id: nil} = state) do
-    Logger.error("Tried to COMMIT when not in a transaction")
+  def handle_call({:commit, log_meta}, _from, %{transaction_id: nil} = state) do
+    Logger.error("Tried to COMMIT when not in a transaction", log_meta)
     {:reply, {:error, :not_in_transaction}, state}
   end
 
-  def handle_call({:commit}, _from, state) do
+  def handle_call({:commit, log_meta}, _from, state) do
+    start_custom_log_metadata_scope(log_meta)
+
     sql = "COMMIT"
+    Logger.debug("COMMIT")
 
     case SQLite.exec(state.conn, sql) do
       :ok ->
+        end_custom_log_metadata_scope()
         {:reply, :ok, %{state | transaction_id: nil}}
 
       {:error, r} ->
         Logger.error("Error running #{sql}: #{inspect(r)}")
+        end_custom_log_metadata_scope()
         {:reply, {:error, r}, state}
     end
   end
 
-  # TODO: Test me
   # ROLLBACK
-  def handle_call({:rollback}, _from, %{transaction_id: nil} = state) do
-    Logger.error("Tried to ROLBACK when not in a transaction")
+  def handle_call({:rollback, log_meta}, _from, %{transaction_id: nil} = state) do
+    Logger.error("Tried to ROLBACK when not in a transaction", log_meta)
     {:reply, {:error, :not_in_transaction}, state}
   end
 
-  def handle_call({:rollback}, _from, state) do
+  def handle_call({:rollback, log_meta}, _from, state) do
+    start_custom_log_metadata_scope(log_meta)
     sql = "ROLLBACK"
 
     case SQLite.exec(state.conn, sql) do
       :ok ->
+        end_custom_log_metadata_scope()
         {:reply, :ok, %{state | transaction_id: nil}}
 
       {:error, r} ->
         Logger.error("Error running #{sql}: #{inspect(r)}")
+        end_custom_log_metadata_scope()
         {:reply, {:error, r}, state}
     end
   end
 
   # Queries (SELECT/UPDATE/INSERT/DELETE)
 
-  def handle_call({:query, type, {domain, query_name}, bindings_values, opts}, _from, state) do
+  def handle_call(
+        {:query, type, {domain, query_name}, bindings_values, opts, log_meta},
+        _from,
+        state
+      ) do
+    start_custom_log_metadata_scope(log_meta)
     query_id = {state.context, domain, query_name}
     {sql, _, _} = query = Query.fetch!(query_id, opts)
 
     bindings_values = normalize_bindings_values(bindings_values)
+
+    Logger.debug("Query: #{inspect(sql)}. Bindings: #{inspect(bindings_values)}")
 
     with {:ok, {stmt, stmt_sql}} <- prepare_query(state, query_id, sql),
          true = stmt_sql == sql,
@@ -244,29 +350,13 @@ defmodule Feeb.DB.Repo do
       }
 
       result = format_result(type, query_id, query, rows, bindings_values, attrs)
+      end_custom_log_metadata_scope()
       {:reply, result, state}
     else
       {:error, _} = err ->
-        Logger.error("error: #{inspect(err)}")
+        Logger.error("Query error: #{inspect(err)}")
         # TODO: Rollback?
-        {:reply, err, state}
-    end
-  end
-
-  # TODO: Unused? At least make sure its usage is documented
-  def handle_call({:prepared_raw, raw_sql, bindings_values, opts}, _from, state) do
-    raise "Remove or document usage"
-
-    with {:ok, stmt} <- SQLite.prepare(state.conn, raw_sql),
-         :ok <- SQLite.bind(stmt, bindings_values),
-         {:ok, rows} <- SQLite.all(state.conn, stmt) do
-      schema = Keyword.fetch!(opts, :schema)
-      result = format_custom(:all, schema, rows)
-      {:reply, result, state}
-    else
-      {:error, _} = err ->
-        Logger.error("error: #{inspect(err)}")
-        # TODO: Rollback?
+        end_custom_log_metadata_scope()
         {:reply, err, state}
     end
   end
@@ -351,6 +441,7 @@ defmodule Feeb.DB.Repo do
 
   defp create_schema_from_rows(query_id, {_, {_, params_bindings}, :insert}, rows) do
     model = Schema.get_model_from_query_id(query_id)
+
     Enum.map(rows, fn row -> Schema.from_row(model, params_bindings, row) end)
   end
 
@@ -369,15 +460,6 @@ defmodule Feeb.DB.Repo do
     # longer. Simply create the full schema and use only the fields the user selected
     create_schema_from_rows(query_id, query, rows)
     |> Enum.map(fn full_result -> Map.take(full_result, fields_bindings) end)
-  end
-
-  # Used by `prepared_raw` exclusively
-  defp format_custom(:all, nil, rows) do
-    rows
-  end
-
-  defp format_custom(:all, schema, rows) do
-    Enum.map(rows, fn row -> Schema.from_row(schema, [:*], row) end)
   end
 
   defp prepare_query(state, _query_id, sql) do
@@ -434,5 +516,16 @@ defmodule Feeb.DB.Repo do
   defp assert_release_signal_from_manager!(manager_pid, other_pid) do
     "Repo can only be released by its Manager (#{inspect(manager_pid)}, got #{inspect(other_pid)})"
     |> raise()
+  end
+
+  # Logger metadata handling
+
+  defp start_custom_log_metadata_scope(custom_metadata) do
+    Process.put({:feebdb, :original_scope_metadata}, Logger.metadata())
+    Logger.metadata(custom_metadata)
+  end
+
+  defp end_custom_log_metadata_scope do
+    Logger.reset_metadata(Process.get({:feebdb, :original_scope_metadata}))
   end
 end
