@@ -13,11 +13,11 @@ defmodule Feeb.DB.SQLite do
 
   @default_chunk_size 50
 
-  def open(path) when is_binary(path), do: Driver.open(path)
+  def open(path) when is_binary(path), do: traced_driver_operation(:open, [path])
 
-  def close(conn), do: Driver.close(conn)
+  def close(conn), do: traced_driver_operation(:close, [conn])
 
-  def exec(conn, sql), do: Driver.execute(conn, sql)
+  def exec(conn, sql), do: traced_driver_operation(:execute, [conn, sql])
 
   def raw(conn, sql) do
     with {:ok, stmt} <- prepare(conn, sql) do
@@ -35,7 +35,7 @@ defmodule Feeb.DB.SQLite do
 
   # TODO: What is the error type? Add typespecs and review Repo code
   def prepare(conn, sql) do
-    Driver.prepare(conn, sql)
+    traced_driver_operation(:prepare, [conn, sql])
   end
 
   def bind(_, _, []),
@@ -43,7 +43,7 @@ defmodule Feeb.DB.SQLite do
 
   def bind(stmt, bindings) when is_list(bindings) do
     try do
-      Driver.bind(stmt, bindings)
+      traced_driver_operation(:bind, [stmt, bindings])
     rescue
       e in ArgumentError ->
         Logger.error(e)
@@ -83,10 +83,16 @@ defmodule Feeb.DB.SQLite do
   end
 
   defp step_chunk(conn, stmt, chunk_size) do
-    case Driver.multi_step(conn, stmt, chunk_size) do
+    case traced_driver_operation(:multi_step, [conn, stmt, chunk_size]) do
       {:rows, rows} -> {:ok, :not_done, rows}
       {:done, rows} -> {:ok, :done, rows}
       {:error, _} = error -> error
     end
+  end
+
+  defp traced_driver_operation(operation, args) do
+    {duration, result} = :timer.tc(fn -> apply(Driver, operation, args) end)
+    :telemetry.execute([:feebdb, :driver_op, operation], %{duration: duration}, %{})
+    result
   end
 end
