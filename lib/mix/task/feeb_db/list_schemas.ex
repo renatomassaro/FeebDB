@@ -43,9 +43,10 @@ defmodule Mix.Tasks.FeebDb.ListSchemas do
     modules =
       @table
       |> :ets.tab2list()
+      |> Enum.sort()
       |> Enum.reduce(%{}, fn {ctx, mod}, acc ->
         ctx_mods = Map.get(acc, ctx, [])
-        Map.put(acc, ctx, [to_string(mod) | ctx_mods])
+        Map.put(acc, ctx, [to_string(mod) | ctx_mods] |> Enum.sort())
       end)
 
     File.write!(@default_target, :json.encode(modules))
