@@ -20,6 +20,9 @@ defmodule Feeb.DB.Query.Binding do
     parse_comma_separated(raw_fields)
   end
 
+  # If explicit field bindings were provided via `-- @fields`, use them
+  def parse_fields(_qt, _sql, [_ | _] = bindings), do: bindings
+
   def parse_fields(:select, sql, []) do
     [raw_fields | _] =
       sql

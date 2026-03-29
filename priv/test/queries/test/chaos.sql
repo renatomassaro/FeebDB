@@ -33,3 +33,9 @@ DELETE FROM accounts WHERE id = ? AND email = ?;
 -- @bind [:acc_id, :email_address]
 -- :delete2
 DELETE FROM accounts WHERE id = ? AND email = ?;
+
+-- @fields [:*]
+-- :get_with_join
+SELECT a.* FROM accounts a
+JOIN users u ON a.id = u.account_id
+WHERE u.id = ?;
