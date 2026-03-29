@@ -29,7 +29,8 @@ defmodule Feeb.DB.QueryTest do
         :update_password,
         :update_password2,
         :delete,
-        :delete2
+        :delete2,
+        :get_with_join
       ]
       |> Enum.each(fn query_name ->
         assert_chaos_query(query_name, Query.fetch!({:test, :chaos, query_name}))
@@ -339,6 +340,15 @@ defmodule Feeb.DB.QueryTest do
     assert fields_b == []
     assert params_b == [:acc_id, :email_address]
     assert qt == :delete
+  end
+
+  defp assert_chaos_query(:get_with_join, query) do
+    {sql, {fields_b, params_b}, qt} = query
+    assert sql == "select a.* from accounts a join users u on a.id = u.account_id where u.id = ?;"
+    # The @fields annotation overrides the default parsing which would return `[:"a.*"]`
+    assert fields_b == [:*]
+    assert params_b == [:"u.id"]
+    assert qt == :select
   end
 
   defp erase_all_query_caches do

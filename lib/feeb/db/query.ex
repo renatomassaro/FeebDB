@@ -394,6 +394,13 @@ defmodule Feeb.DB.Query do
   defp add_query_type(qt, line, qs, id, {sql, bindings, nil}),
     do: handle_line(line, qs, id, {sql, bindings, qt})
 
+  # @fields atstring: Matching on "fields ["
+  defp handle_atstring(<<102, 105, 101, 108, 100, 115, 32, 91, raw_bindings::binary>>, qs, id, q) do
+    {sql, {_prev_field_bindings, params_bindings}, qt} = q
+    field_bindings = Binding.parse_atstring(raw_bindings)
+    {qs, id, {sql, {field_bindings, params_bindings}, qt}}
+  end
+
   # @bind atstring: Matching on "bind ["
   defp handle_atstring(<<98, 105, 110, 100, 32, 91, raw_bindings::binary>>, qs, id, q) do
     {sql, {field_bindings, prev_params_bindings}, qt} = q
