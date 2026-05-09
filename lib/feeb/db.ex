@@ -302,7 +302,7 @@ defmodule Feeb.DB do
   end
 
   defp get_bindings(query_id, struct) do
-    {_, {_, params_bindings}, _} = Query.fetch!(query_id)
+    {_, _, {_, params_bindings}, _} = Query.fetch!(query_id)
 
     # Ensure we are handling all and only the casted fields
     # validate_bindings!(query_id, struct, params_bindings)

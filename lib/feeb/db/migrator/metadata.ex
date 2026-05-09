@@ -13,7 +13,7 @@ defmodule Feeb.DB.Migrator.Metadata do
     Logger.info("Setting up metadata table")
 
     """
-    CREATE TABLE #{@migrations_table} (
+    CREATE TABLE IF NOT EXISTS #{@migrations_table} (
       domain TEXT,
       version INTEGER,
       PRIMARY KEY (domain, version)
@@ -22,7 +22,7 @@ defmodule Feeb.DB.Migrator.Metadata do
     |> SQLite.raw2!(conn)
 
     """
-    CREATE TABLE #{@summary_table} (
+    CREATE TABLE IF NOT EXISTS #{@summary_table} (
       domain TEXT,
       version INTEGER,
       PRIMARY KEY (domain, version)

@@ -105,7 +105,11 @@ defmodule Feeb.DB.Repo.Manager do
 
       {:busy, new_state} ->
         new_state = enqueue_request(new_state, mode, caller, opts)
-        Logger.info("All #{mode} connections are busy; enqueueing caller")
+
+        Logger.info(
+          "All #{mode} connections are busy; enqueueing caller - #{inspect(state.context)} - #{inspect(state.shard_id)}"
+        )
+
         {:noreply, new_state}
 
       {:error, new_state} ->
@@ -249,10 +253,10 @@ defmodule Feeb.DB.Repo.Manager do
         repo_entry = fetch_repo_entry!(state, key)
 
         # Stop the repo_timeout timer
-        stop_timer(repo_entry.timer_ref)
+        if repo_entry.timer_ref, do: stop_timer(repo_entry.timer_ref)
 
         # Stop monitoring the caller process since it released the connection
-        Process.demonitor(repo_entry.monitor_ref)
+        if repo_entry.monitor_ref, do: Process.demonitor(repo_entry.monitor_ref)
 
         # Notify the Repo that it's been released
         :ok = Repo.notify_release(pid)

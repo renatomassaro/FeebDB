@@ -45,7 +45,7 @@ defmodule Feeb.DB.Query do
     adhoc_query_name = :"#{query_name}$#{get_query_name_suffix(sorted_target_fields)}"
     adhoc_query_id = {context, domain, adhoc_query_name}
 
-    {sql, {fields_bindings, params_bindings}, qt} = fetch!(original_query_id)
+    {sql, [], {fields_bindings, params_bindings}, qt} = fetch!(original_query_id)
 
     if fields_bindings != [:*] do
       raise "#{inspect(original_query_id)}: Custom selection can only be used on 'SELECT *' queries"
@@ -57,6 +57,7 @@ defmodule Feeb.DB.Query do
     end)
 
     # "Compile" new query (replaces `SELECT *` with `SELECT <sorted_target_fields>`)
+    # Note: adhoc queries are stored in the old 3-tuple format for compatibility with persistent_term
     new_sql = String.replace(sql, "*", Enum.join(sorted_target_fields, ", "), global: false)
     adhoc_q = {new_sql, {sorted_target_fields, params_bindings}, qt}
 
@@ -210,20 +211,56 @@ defmodule Feeb.DB.Query do
     :persistent_term.put({:db_sql_queries, {context, domain}}, new_adhoc_queries)
   end
 
-  def fetch!(query_id, opts \\ [])
+  @doc """
+  Fetches a compiled query and expands list bindings for IN (?) clauses.
 
-  def fetch!({:pragma, :user_version}, _), do: {"PRAGMA user_version", [], nil}
-  def fetch!({:pragma, :set_user_version}, _), do: {"PRAGMA user_version = ?", [], nil}
-  def fetch!({:begin, :deferred}, _), do: {"BEGIN DEFERRED", [], nil}
-  def fetch!({:begin, :concurrent}, _), do: {"BEGIN CONCURRENT", [], nil}
-  def fetch!({:begin, :exclusive}, _), do: {"BEGIN EXCLUSIVE", [], nil}
-  def fetch!({_, :pragma, name}, _), do: fetch!({:pragma, name})
+  Returns `{sql, bindings, binding_metadata, query_type}` where:
+  - `sql` - SQL string with `?` placeholders expanded for any list bindings
+  - `bindings` - Flattened list of binding values ready for SQLite
+  - `binding_metadata` - Tuple of `{fields_bindings, params_bindings}` from compilation
+  - `query_type` - One of `:select`, `:insert`, `:update`, `:delete`
 
-  def fetch!({context, domain, name}, opts) do
-    fetch_all!({context, domain})
-    |> Map.fetch!(name)
-    |> maybe_inject_returning_clause(opts)
+  ## Examples
+
+      # Simple query without list bindings
+      fetch!({:test, :users, :get_by_id}, [1])
+      #=> {"SELECT * FROM users WHERE id = ?", [1], {[:*], [:id]}, :select}
+
+      # Query with IN clause and list binding
+      fetch!({:test, :users, :get_by_ids}, [[1, 2, 3]])
+      #=> {"SELECT * FROM users WHERE id IN (?, ?, ?)", [1, 2, 3], {[:*], [:ids]}, :select}
+  """
+  def fetch!(query_id, bindings \\ [], opts \\ [])
+
+  def fetch!({:pragma, :user_version}, _, _), do: {"PRAGMA user_version", [], {[], []}, nil}
+  def fetch!({:pragma, :set_user_version}, _, _), do: {"PRAGMA user_version = ?", [], {[], []}, nil}
+  def fetch!({:begin, :deferred}, _, _), do: {"BEGIN DEFERRED", [], {[], []}, nil}
+  def fetch!({:begin, :concurrent}, _, _), do: {"BEGIN CONCURRENT", [], {[], []}, nil}
+  def fetch!({:begin, :exclusive}, _, _), do: {"BEGIN EXCLUSIVE", [], {[], []}, nil}
+  def fetch!({_, :pragma, name}, b, o), do: fetch!({:pragma, name}, b, o)
+
+  def fetch!({context, domain, name}, bindings, opts) do
+    {sql, binding_metadata, query_type} =
+      fetch_all!({context, domain})
+      |> Map.fetch!(name)
+      |> maybe_inject_returning_clause(opts)
+
+    bindings = normalize_bindings(bindings)
+    {expanded_sql, expanded_bindings} = expand_list_bindings(sql, bindings)
+
+    {expanded_sql, expanded_bindings, binding_metadata, query_type}
   end
+
+  # Recursive over bindings and normalize their values for SQL-friendliness
+  defp normalize_bindings(bindings) when is_list(bindings),
+    do: Enum.map(bindings, &normalize_binding/1)
+
+  defp normalize_binding(list) when is_list(list),
+    do: Enum.map(list, &normalize_binding/1)
+
+  # If a struct was passed, we expect it to implement String.Chars
+  defp normalize_binding(%_{} = struct_value), do: to_string(struct_value)
+  defp normalize_binding(value), do: value
 
   def get({context, domain, name}, opts \\ []) do
     fetch_all!({context, domain})
@@ -250,6 +287,50 @@ defmodule Feeb.DB.Query do
     else
       raw_query
     end
+  end
+
+  @doc """
+  Expands list bindings for IN (?) clauses.
+
+  When a binding value is a list, the corresponding `?` placeholder is expanded
+  to match the list length, and the list is flattened into the bindings.
+
+  ## Example
+
+      iex> expand_list_bindings("WHERE id IN ( ? )", [[1, 2, 3]])
+      {"WHERE id IN ( ?, ?, ? )", [1, 2, 3]}
+
+      iex> expand_list_bindings("WHERE a = ? AND b IN ( ? )", [1, [2, 3]])
+      {"WHERE a = ? AND b IN ( ?, ? )", [1, 2, 3]}
+
+  Raises `ArgumentError` if an empty list is provided.
+  """
+  def expand_list_bindings(sql, bindings) do
+    {expanded_sql, expanded_bindings, _} =
+      Enum.reduce(bindings, {sql, [], 0}, fn
+        [], {_sql_acc, _bindings_acc, _idx} ->
+          raise ArgumentError, "Empty lists are not supported in IN clauses"
+
+        list, {sql_acc, bindings_acc, idx} when is_list(list) ->
+          placeholders = list |> Enum.map(fn _ -> "?" end) |> Enum.join(", ")
+          new_sql = replace_nth_placeholder(sql_acc, idx, placeholders)
+          {new_sql, bindings_acc ++ list, idx + 1}
+
+        value, {sql_acc, bindings_acc, idx} ->
+          {sql_acc, bindings_acc ++ [value], idx + 1}
+      end)
+
+    {expanded_sql, expanded_bindings}
+  end
+
+  # Replaces the nth "?" placeholder (0-indexed) with the replacement string
+  defp replace_nth_placeholder(sql, n, replacement) do
+    {prefix, rest} =
+      sql
+      |> String.split("?")
+      |> Enum.split(n + 1)
+
+    Enum.join(prefix, "?") <> replacement <> Enum.join(rest, "?")
   end
 
   defp get_query_name_suffix(target_fields) when is_list(target_fields) do
