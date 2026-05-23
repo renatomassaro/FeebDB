@@ -139,6 +139,31 @@ defmodule Feeb.DB.RepoTest do
     end
   end
 
+  describe "handle_call: query with IN clause" do
+    test "expands list bindings for IN clauses", %{repo: repo} do
+      # Query: SELECT * FROM friends WHERE id IN ( ? )
+      # The list [1, 2, 3] should be expanded to multiple placeholders
+      assert {:ok, results} = Repo.all(repo, {:friends, :get_by_ids}, [[1, 2, 3]], [])
+
+      ids = Enum.map(results, & &1.id) |> Enum.sort()
+      assert ids == [1, 2, 3]
+    end
+
+    test "works with single-element lists", %{repo: repo} do
+      assert {:ok, results} = Repo.all(repo, {:friends, :get_by_ids}, [[1]], [])
+
+      assert length(results) == 1
+      assert hd(results).id == 1
+    end
+
+    test "raises on empty lists", %{repo: _repo} do
+      # The exception is raised before the GenServer call, so we test Query directly
+      assert_raise ArgumentError, ~r/Empty lists are not supported/, fn ->
+        Feeb.DB.Query.expand_list_bindings("SELECT * FROM t WHERE id IN ( ? )", [[]])
+      end
+    end
+  end
+
   describe "handle_call: raw" do
     @tag capture_log: true
     test "executes raw queries", %{repo: repo} do

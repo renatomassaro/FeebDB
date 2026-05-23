@@ -12,3 +12,7 @@ insert into friends (id, name) values (?, ?);
 
 -- :insert
 insert into friends (id, name) values (?, ?);
+
+-- @bind [:ids]
+-- :get_by_ids
+SELECT * FROM friends WHERE id IN ( ? );

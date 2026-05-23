@@ -56,7 +56,7 @@ defmodule Feeb.DB.QueryTest do
       original_query_id = {:test, :all_types, :get_by_integer}
       query_id = Query.compile_adhoc_query(original_query_id, [:string, :atom, :uuid])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id, [])
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:atom, :string, :uuid]
       assert bindings == [:integer]
@@ -99,7 +99,7 @@ defmodule Feeb.DB.QueryTest do
       query_id = {:test, :friends, :__all}
       Query.get_templated_query_id(query_id, [:*])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:*]
       assert bindings == []
@@ -111,7 +111,7 @@ defmodule Feeb.DB.QueryTest do
 
       query_id = Query.get_templated_query_id({:test, :friends, :__all}, [:name])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:name]
       assert bindings == []
@@ -124,7 +124,7 @@ defmodule Feeb.DB.QueryTest do
       query_id = {:test, :friends, :__fetch}
       Query.get_templated_query_id(query_id, [:*])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:*]
       assert bindings == [:id]
@@ -137,7 +137,7 @@ defmodule Feeb.DB.QueryTest do
       query_id = {:test, :order_items, :__fetch}
       Query.get_templated_query_id(query_id, [:*])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :select
       assert target_fields == [:*]
       assert bindings == [:order_id, :product_id]
@@ -149,7 +149,7 @@ defmodule Feeb.DB.QueryTest do
 
       query_id = Query.get_templated_query_id({:test, :order_items, :__fetch}, [:quantity, :price])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert sql == "SELECT quantity, price FROM order_items WHERE order_id = ? AND product_id = ?;"
       assert target_fields == [:quantity, :price]
       assert bindings == [:order_id, :product_id]
@@ -188,7 +188,7 @@ defmodule Feeb.DB.QueryTest do
       query_id = {:test, :friends, :__insert}
       Query.get_templated_query_id(query_id, [:*])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :insert
       assert target_fields == []
       assert bindings == [:id, :name, :sibling_count]
@@ -200,7 +200,7 @@ defmodule Feeb.DB.QueryTest do
 
       query_id = Query.get_templated_query_id({:test, :friends, :__update}, [:name])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :update
       assert target_fields == []
       assert bindings == [:name, :id]
@@ -213,7 +213,7 @@ defmodule Feeb.DB.QueryTest do
       query_id =
         Query.get_templated_query_id({:test, :friends, :__update}, [:name, :sibling_count])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :update
       assert target_fields == []
       assert bindings == [:name, :sibling_count, :id]
@@ -229,7 +229,7 @@ defmodule Feeb.DB.QueryTest do
 
       query_id = Query.get_templated_query_id({:test, :order_items, :__update}, [:quantity])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :update
       assert target_fields == []
       assert bindings == [:quantity, :order_id, :product_id]
@@ -257,7 +257,7 @@ defmodule Feeb.DB.QueryTest do
       query_id = {:test, :friends, :__delete}
       Query.get_templated_query_id(query_id, [])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :delete
       assert target_fields == []
       assert bindings == [:id]
@@ -270,7 +270,7 @@ defmodule Feeb.DB.QueryTest do
       query_id = {:test, :order_items, :__delete}
       Query.get_templated_query_id(query_id, [])
 
-      assert {sql, {target_fields, bindings}, query_type} = Query.fetch!(query_id)
+      assert {sql, [], {target_fields, bindings}, query_type} = Query.fetch!(query_id)
       assert query_type == :delete
       assert target_fields == []
       assert bindings == [:order_id, :product_id]
@@ -294,7 +294,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:get, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
     assert sql == "select * from accounts limit 1;"
     assert fields_b == [:*]
     assert params_b == []
@@ -302,7 +302,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:create_user, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
 
     assert sql == "insert into accounts ( id, username, email ) values ( ?, ?, ? );"
     assert fields_b == []
@@ -311,7 +311,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:update_password, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
     assert sql == "update accounts set password = ? where id = ?;"
     assert fields_b == []
     assert params_b == [:password, :id]
@@ -319,7 +319,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:update_password2, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
     assert sql == "update accounts set password = ? where id = ?;"
     assert fields_b == []
     assert params_b == [:pwd, :account_id]
@@ -327,7 +327,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:delete, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
     assert sql == "delete from accounts where id = ? and email = ?;"
     assert fields_b == []
     assert params_b == [:id, :email]
@@ -335,7 +335,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:delete2, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
     assert sql == "delete from accounts where id = ? and email = ?;"
     assert fields_b == []
     assert params_b == [:acc_id, :email_address]
@@ -343,7 +343,7 @@ defmodule Feeb.DB.QueryTest do
   end
 
   defp assert_chaos_query(:get_with_join, query) do
-    {sql, {fields_b, params_b}, qt} = query
+    {sql, [], {fields_b, params_b}, qt} = query
     assert sql == "select a.* from accounts a join users u on a.id = u.account_id where u.id = ?;"
     # The @fields annotation overrides the default parsing which would return `[:"a.*"]`
     assert fields_b == [:*]

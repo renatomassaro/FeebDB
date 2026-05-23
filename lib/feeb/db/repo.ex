@@ -257,9 +257,12 @@ defmodule Feeb.DB.Repo do
   # BEGIN
   def handle_call({:begin, txn_type, log_meta}, _from, %{transaction_id: nil} = state) do
     start_custom_log_metadata_scope(log_meta)
-    Logger.debug("BEGIN")
 
-    {sql, _, _} = Query.fetch!({:begin, txn_type})
+    ctx = state.context
+    shard_id = state.shard_id
+    Logger.debug("[#{ctx}@#{shard_id}] BEGIN")
+
+    {sql, _, _, _} = Query.fetch!({:begin, txn_type})
 
     case SQLite.exec(state.conn, sql) do
       :ok ->
@@ -288,8 +291,11 @@ defmodule Feeb.DB.Repo do
   def handle_call({:commit, log_meta}, _from, state) do
     start_custom_log_metadata_scope(log_meta)
 
+    ctx = state.context
+    shard_id = state.shard_id
+    Logger.debug("[#{ctx}@#{shard_id}] COMMIT")
+
     sql = "COMMIT"
-    Logger.debug("COMMIT")
 
     case SQLite.exec(state.conn, sql) do
       :ok ->
@@ -334,14 +340,16 @@ defmodule Feeb.DB.Repo do
       ) do
     start_custom_log_metadata_scope(log_meta)
     query_id = {state.context, domain, query_name}
-    {sql, _, _} = query = Query.fetch!(query_id, opts)
 
-    bindings_values = normalize_bindings_values(bindings_values)
+    {sql, bindings_values, binding_metadata, query_type} =
+      Query.fetch!(query_id, bindings_values, opts)
 
-    Logger.debug("Query: #{inspect(sql)}. Bindings: #{inspect(bindings_values)}")
+    ctx = state.context
+    shard_id = state.shard_id
 
-    with {:ok, {stmt, stmt_sql}} <- prepare_query(state, query_id, sql),
-         true = stmt_sql == sql,
+    Logger.debug("[#{ctx}@#{shard_id}] #{inspect(sql)} - #{inspect(bindings_values)}")
+
+    with {:ok, {stmt, _stmt_sql}} <- prepare_query(state, query_id, sql),
          :ok <- SQLite.bind(stmt, bindings_values),
          {:ok, rows} <- SQLite.all(state.conn, stmt) do
       attrs = %{
@@ -349,6 +357,8 @@ defmodule Feeb.DB.Repo do
         returning: opts[:returning] || false
       }
 
+      # Reconstruct query tuple for format_result (uses binding_metadata for deserialization)
+      query = {sql, binding_metadata, query_type}
       result = format_result(type, query_id, query, rows, bindings_values, attrs)
       end_custom_log_metadata_scope()
       {:reply, result, state}
@@ -494,17 +504,6 @@ defmodule Feeb.DB.Repo do
 
   defp custom_pragma_for_prod(conn) do
     :ok = SQLite.exec(conn, "PRAGMA synchronous=1")
-  end
-
-  defp normalize_bindings_values(raw_values) when is_list(raw_values) do
-    Enum.map(raw_values, fn
-      # If a struct was passed as variable, we expect it to implement String.Chars
-      %_{} = struct_value ->
-        to_string(struct_value)
-
-      other_value ->
-        other_value
-    end)
   end
 
   defp assert_release_signal_from_manager!(manager_pid, manager_pid), do: :ok
