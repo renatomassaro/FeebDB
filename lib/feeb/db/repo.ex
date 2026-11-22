@@ -1,13 +1,22 @@
 defmodule Feeb.DB.Repo do
   @moduledoc false
 
-  @struct_keys [:manager_pid, :context, :shard_id, :mode, :path, :conn, :transaction_id]
+  @struct_keys [
+    :manager_pid,
+    :context,
+    :shard_id,
+    :mode,
+    :path,
+    :conn,
+    :transaction_id,
+    :capture_failed?
+  ]
   @enforce_keys List.delete(@struct_keys, [:transaction_id])
   defstruct @struct_keys
 
   use GenServer
   require Logger
-  alias Feeb.DB.{Config, Migrator, Query, Schema, SQLite}
+  alias Feeb.DB.{Capture, Config, LocalState, Migrator, Query, Schema, SQLite}
   alias __MODULE__.RepoConfig
 
   @env Mix.env()
@@ -81,14 +90,30 @@ defmodule Feeb.DB.Repo do
   def notify_release(pid),
     do: GenServer.call(pid, {:mgt_connection_released})
 
+  @doc """
+  Used by Capture to flag that a change in the current transaction could not be captured. Once
+  flagged, the Repo refuses to COMMIT the transaction. The flag is reset on the next BEGIN.
+  """
+  def flag_capture_failed(pid),
+    do: GenServer.cast(pid, :capture_failed)
+
   defp run_query(query_type, pid, {domain, query_name}, bindings, opts) do
+    opts = Capture.opts(query_type, opts)
+
     with_telemetry(
       :query,
       fn ->
-        GenServer.call(
-          pid,
-          {:query, query_type, {domain, query_name}, bindings, opts, Logger.metadata()}
-        )
+        msg = {:query, query_type, {domain, query_name}, bindings, opts, Logger.metadata()}
+
+        case GenServer.call(pid, msg) do
+          # Runs here, in the caller, so a capture error raises here and the Repo stays up
+          {:captured, result, {type, query_id, rows}} ->
+            LocalState.add_changes(Capture.changes(pid, type, query_id, rows))
+            result
+
+          result ->
+            result
+        end
       end,
       %{query_type: query_type, domain: domain, query_name: query_name}
     )
@@ -136,7 +161,8 @@ defmodule Feeb.DB.Repo do
           mode: mode,
           path: path,
           conn: conn,
-          transaction_id: nil
+          transaction_id: nil,
+          capture_failed?: false
         }
 
         # `repo_config` is metadata that the Schema has access to when building virtual fields
@@ -224,7 +250,8 @@ defmodule Feeb.DB.Repo do
 
       :needs_write_access ->
         Logger.info("Migrating shard #{state.shard_id} via write connection")
-        Feeb.DB.begin(state.context, state.shard_id, :write)
+        # This is a FeebDB-initiated write, s owe'll disable capture and hooks
+        Feeb.DB.begin(state.context, state.shard_id, :write, hooks: false)
         Feeb.DB.commit()
         {:noreply, state}
     end
@@ -268,7 +295,7 @@ defmodule Feeb.DB.Repo do
       :ok ->
         txn_id = gen_transaction_id()
         end_custom_log_metadata_scope()
-        {:reply, :ok, %{state | transaction_id: txn_id}}
+        {:reply, :ok, %{state | transaction_id: txn_id, capture_failed?: false}}
 
       {:error, r} ->
         Logger.error("Unable to BEGIN: #{inspect(r)}")
@@ -286,6 +313,11 @@ defmodule Feeb.DB.Repo do
   def handle_call({:commit, log_meta}, _from, %{transaction_id: nil} = state) do
     Logger.error("Tried to COMMIT when not in a transaction", log_meta)
     {:reply, {:error, :not_in_transaction}, state}
+  end
+
+  def handle_call({:commit, log_meta}, _from, %{capture_failed?: true} = state) do
+    Logger.error("Refusing to COMMIT: a change in this transaction was not captured", log_meta)
+    {:reply, {:error, :capture_failed}, state}
   end
 
   def handle_call({:commit, log_meta}, _from, state) do
@@ -354,14 +386,21 @@ defmodule Feeb.DB.Repo do
          {:ok, rows} <- SQLite.all(state.conn, stmt) do
       attrs = %{
         format: opts[:format] || :schema,
-        returning: opts[:returning] || false
+        returning: opts[:returning] || false,
+        capture: opts[:feebdb_capture] || false
       }
 
       # Reconstruct query tuple for format_result (uses binding_metadata for deserialization)
       query = {sql, binding_metadata, query_type}
       result = format_result(type, query_id, query, rows, bindings_values, attrs)
+
+      reply =
+        if attrs.capture,
+          do: {:captured, result, {type, query_id, rows}},
+          else: result
+
       end_custom_log_metadata_scope()
-      {:reply, result, state}
+      {:reply, reply, state}
     else
       {:error, _} = err ->
         Logger.error("Query error: #{inspect(err)}")
@@ -380,6 +419,9 @@ defmodule Feeb.DB.Repo do
       {:error, _} = err -> {:reply, err, state}
     end
   end
+
+  def handle_cast(:capture_failed, state),
+    do: {:noreply, %{state | capture_failed?: true}}
 
   defp format_result(:one, _, _, [row], _, %{format: :raw}), do: {:ok, row}
 
@@ -401,6 +443,12 @@ defmodule Feeb.DB.Repo do
   defp format_result(:all, query_id, query, rows, _, %{format: :schema}),
     do: {:ok, create_schema_from_rows(query_id, query, rows)}
 
+  defp format_result(:insert, query_id, _, [row], _, %{capture: true, format: :schema}),
+    do: {:ok, Schema.from_row(Schema.get_model_from_query_id(query_id), [:*], row)}
+
+  defp format_result(:insert, _, _, [_row], _, %{capture: true}),
+    do: {:ok, nil}
+
   defp format_result(:insert, _, _, [], _, %{format: format}) when format in [:raw, :map],
     do: {:ok, nil}
 
@@ -421,7 +469,8 @@ defmodule Feeb.DB.Repo do
   defp format_result(:update, query_id, query, [row], _bindings, %{returning: true}),
     do: {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
 
-  defp format_result(:update_all, _, _, [], _, %{returning: false}),
+  # Rows may be present without `returning: true` when they were requested for change capture
+  defp format_result(:update_all, _, _, _rows, _, %{returning: false}),
     do: {:ok, nil}
 
   defp format_result(:update_all, _, _, rows, _, %{returning: true}),
@@ -433,10 +482,10 @@ defmodule Feeb.DB.Repo do
   defp format_result(:delete, query_id, query, [row], _, %{returning: true}),
     do: {:ok, create_schema_from_rows(query_id, query, [row]) |> List.first()}
 
-  defp format_result(:delete, _, _, [], _, %{returning: false}),
+  defp format_result(:delete, _, _, _rows, _, %{returning: false}),
     do: {:ok, nil}
 
-  defp format_result(:delete_all, _, _, [], _, %{returning: false}),
+  defp format_result(:delete_all, _, _, _rows, _, %{returning: false}),
     do: {:ok, nil}
 
   defp format_result(:delete_all, _, _, rows, _, %{returning: true}),

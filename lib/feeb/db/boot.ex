@@ -7,10 +7,17 @@ defmodule Feeb.DB.Boot do
   @boot_indicator_key :feebdb_finished_booting
 
   def run do
+    # Before anything else: shards opened meanwhile (e.g. by a test helper) migrate with it
+    Migrator.setup()
+
+    # Queries before shards, so `:on_shard_boot` hooks can use them while the shards migrate
+    {t, _} = :timer.tc(fn -> prepare() end)
+    Logger.info("Queries compiled in #{trunc(t / 1000)}ms")
+
     {t, _} = :timer.tc(fn -> migrate_shards() end)
     Logger.info("Shards migrated in #{trunc(t / 1000)}ms")
 
-    {t, _} = :timer.tc(fn -> setup() end)
+    {t, _} = :timer.tc(fn -> validate() end)
     Logger.info("DB setup completed in #{trunc(t / 1000)}ms")
 
     :persistent_term.put(@boot_indicator_key, true)
@@ -85,7 +92,10 @@ defmodule Feeb.DB.Boot do
 
   defp migrate_shard(context, shard_id) do
     # We automatically migrate the shard by simply opening and closing a connection to the shard
-    Feeb.DB.begin(context.name, shard_id, :write)
+    # Disable capture and commit hooks on this FeebDB-initiated write
+    Feeb.DB.begin(context.name, shard_id, :write, hooks: false)
+    payload = %{context: context.name, shard_id: shard_id, capture?: context.capture?}
+    Feeb.DB.Hooks.run(:on_shard_boot, payload)
     Feeb.DB.commit()
     :ok
   end
@@ -110,14 +120,17 @@ defmodule Feeb.DB.Boot do
   # Setup
   ##################################################################################################
 
-  def setup do
+  def prepare do
     all_contexts = Config.contexts()
     all_models = get_all_models()
-    all_queries = get_all_queries()
-    compile_queries(all_queries, all_contexts)
+    compile_queries(get_all_queries(), all_contexts)
+    Enum.each(all_contexts, &save_database_metadata(all_models, &1))
+  end
 
-    Enum.each(all_contexts, fn context ->
-      save_database_metadata(all_models, context)
+  def validate do
+    all_models = get_all_models()
+
+    Enum.each(Config.contexts(), fn context ->
       Feeb.DB.begin(context.name, -1, :read)
       validate_database(all_models, context.name)
       Feeb.DB.commit()
@@ -169,11 +182,11 @@ defmodule Feeb.DB.Boot do
     # Some contexts use queries from a different domain. For example, in HE the Singleplayer and
     # Multiplayer contexts each use queries from the same Game domain.
     all_contexts
-    # Ignore contexts that don't use another domain
-    |> Enum.reject(fn %{name: name, domains: domains} -> domains == [name] end)
     |> Enum.map(fn %{name: name, domains: domains} ->
-      # Now we get all queries from each `domain` and replace them with the context (`name`)
+      # Now we get all queries from each other `domain` and replace them with the context (`name`)
       domains
+      # Drop context's own queries; they were already compiled above
+      |> Enum.reject(&(&1 == name))
       |> Enum.map(fn domain ->
         all_queries
         |> Enum.filter(fn {c, _, _} -> c == domain end)
@@ -216,12 +229,16 @@ defmodule Feeb.DB.Boot do
   end
 
   def validate_database(all_models, context) do
+    %{domains: domains, capture?: capture?} = Config.context(context)
+
     all_models
-    |> Enum.filter(fn {ctx, _} -> ctx == context end)
+    |> Enum.filter(fn {ctx, _} -> ctx in domains end)
     |> Enum.each(fn {_, modules_details} ->
-      Enum.each(modules_details, fn {_, _, table, _} = model ->
+      Enum.each(modules_details, fn {_, model, table, _} = model_details ->
         {:ok, table_info} = Feeb.DB.raw("PRAGMA table_info(#{table})")
-        validate_table_info!(model, table_info)
+        validate_table_info!(model_details, table_info)
+        # Change capture keys every change by the schema's primary key
+        if capture?, do: validate_primary_keys!(model, table, table_info)
       end)
     end)
   end
@@ -274,6 +291,40 @@ defmodule Feeb.DB.Boot do
         _ ->
           raise "Type mismatch: #{sqlite_type}/#{field_type} for #{field} @ #{model}"
       end
+    end)
+
+    # `RETURNING *` rows are read in the schema's order
+    if table_fields != schema_table_fields do
+      "Column order mismatch: #{inspect(table_fields)}/#{inspect(schema_table_fields)} @ #{model}"
+      |> raise()
+    end
+  end
+
+  # Each schema must have either a PK or a UNIQUE index, and the PK in the schema must match the one
+  # in the database
+  defp validate_primary_keys!(model, table, table_info) do
+    keys = Enum.map(model.__primary_keys__() || [], &Atom.to_string/1)
+
+    table_keys =
+      table_info
+      |> Enum.filter(fn [_, _, _, _, _, pk] -> pk > 0 end)
+      |> Enum.sort_by(fn [_, _, _, _, _, pk] -> pk end)
+      |> Enum.map(fn [_, field, _, _, _, _] -> field end)
+
+    if keys != table_keys and not (table_keys == [] and has_unique_index?(table, keys)),
+      do: raise("Primary key mismatch: #{inspect(keys)}/#{inspect(table_keys)} @ #{model}")
+  end
+
+  defp has_unique_index?(table, keys) do
+    {:ok, indexes} = Feeb.DB.raw("PRAGMA index_list(#{table})")
+
+    Enum.any?(indexes, fn
+      [_, name, 1, _, 0] ->
+        {:ok, columns} = Feeb.DB.raw("PRAGMA index_info(#{name})")
+        Enum.map(columns, fn [_, _, column] -> column end) == keys
+
+      _ ->
+        false
     end)
   end
 

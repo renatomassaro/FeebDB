@@ -33,6 +33,41 @@ defmodule Test.Feeb.DB do
     GenServer.call(pid, {:close})
   end
 
+  @doc """
+  Runs `fun` in a transaction on `{context, shard_id}` and commits it. On a raise, throw or exit,
+  rolls it back and re-raises. Raises a `MatchError` if the commit returns an error.
+  """
+  def with_write({context, shard_id}, fun), do: transaction(context, shard_id, :write, fun)
+  def with_read({context, shard_id}, fun), do: transaction(context, shard_id, :read, fun)
+
+  defp transaction(context, shard_id, type, fun) do
+    Feeb.DB.with_context(fn ->
+      Feeb.DB.begin(context, shard_id, type)
+
+      {:ok, result} =
+        try do
+          result = fun.()
+
+          with :ok <- Feeb.DB.commit(), do: {:ok, result}
+        catch
+          kind, reason ->
+            Feeb.DB.rollback()
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
+
+      result
+    end)
+  end
+
+  @doc """
+  Removes every registered hook.
+  """
+  def reset_hooks do
+    Enum.each([:before_commit, :after_commit, :on_shard_boot], fn type ->
+      :persistent_term.erase({Feeb.DB.Hooks, type})
+    end)
+  end
+
   def props_path, do: "#{Test.tmp_path()}/db_props"
   def test_dbs_path, do: "#{Config.data_dir()}"
   def test_queries_path, do: "priv/test/queries"

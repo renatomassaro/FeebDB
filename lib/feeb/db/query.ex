@@ -347,14 +347,15 @@ defmodule Feeb.DB.Query do
   defp maybe_inject_returning_clause(query, []), do: query
 
   defp maybe_inject_returning_clause({sql, bindings, query_type} = query, opts) do
-    with true <- opts[:returning],
-         true <- query_type in [:insert, :update, :delete],
-         false <- Regex.match?(@returning_re, sql) do
-      new_sql = String.replace(sql, ";", " RETURNING #{get_returning_fields(query)};")
+    requested? = opts[:returning] == true and query_type in [:insert, :update, :delete]
+    capture? = opts[:feebdb_capture] == true and query_type in [:insert, :update, :delete]
+
+    if (requested? or capture?) and not Regex.match?(@returning_re, sql) do
+      fields = if capture?, do: "*", else: get_returning_fields(query)
+      new_sql = String.replace(sql, ";", " RETURNING #{fields};")
       {new_sql, bindings, query_type}
     else
-      _ ->
-        query
+      query
     end
   end
 
