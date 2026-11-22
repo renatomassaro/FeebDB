@@ -6,7 +6,7 @@ defmodule Sample.Post do
   @table :posts
 
   @schema [
-    {:id, :integer},
+    {:id, {:integer, nullable: true}},
     {:title, :string},
     {:body, :string},
     {:is_draft, {:boolean, nullable: true}},

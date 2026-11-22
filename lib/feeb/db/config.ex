@@ -10,6 +10,9 @@ defmodule Feeb.DB.Config do
     |> format_contexts()
   end
 
+  def context(name),
+    do: Enum.find(contexts(), &(&1.name == name)) || raise("Unknown context #{inspect(name)}")
+
   def get_schemas_list_path,
     do: Application.get_env(:feebdb, :schemas_list, @default_schemas_list_file)
 
@@ -30,7 +33,9 @@ defmodule Feeb.DB.Config do
       %{
         name: name,
         shard_type: ctx_data.shard_type,
-        domains: ctx_data[:domains] || [name]
+        domains: ctx_data[:domains] || [name],
+        # Change capture is opt-in (see `Feeb.DB.Capture`)
+        capture?: Map.get(ctx_data, :capture, false) == true
       }
     end)
   end

@@ -5,7 +5,7 @@ defmodule Feeb.DB do
   """
 
   require Logger
-  alias Feeb.DB.{LocalState, Query, Repo, Schema}
+  alias Feeb.DB.{Config, Hooks, LocalState, Query, Repo, Schema}
 
   ##################################################################################################
   # Transaction management
@@ -20,11 +20,21 @@ defmodule Feeb.DB do
 
   If `access_type` is `:env`, skip the set up process described above and rely on Context (Process
   state) instead.
+
+  Writes in a context with capture enabled captures its changes, unless `capture: false` is passed.
+  A write with `hooks: false` runs no commit hooks and disables capture.
   """
   def begin(context, shard_id, access_type, opts \\ []) do
     transaction_type = opts[:type] || :exclusive
 
-    setup_env(context, shard_id, access_type, opts)
+    # For now, only write transactions are hook-able. This is likely to change in the future.
+    hooks? = access_type == :write and opts[:hooks] != false
+
+    # `changes` from capture is only accessible to an application via hooks. If hooks are disabled,
+    # it doesn't make sense to have capture enabled.
+    capture? = hooks? and opts[:capture] != false and Config.context(context).capture?
+
+    setup_env(context, shard_id, access_type, opts, capture?: capture?, hooks?: hooks?)
 
     # We can't BEGIN EXCLUSIVE in a read-only database
     txn_type = if(access_type == :read, do: :deferred, else: transaction_type)
@@ -55,13 +65,65 @@ defmodule Feeb.DB do
   @doc """
   Commits a transaction.
 
+  A write runs the `:before_commit` hooks inside the transaction first, and the `:after_commit`
+  hooks once the connection is released. If a before_commit hook raises, throws or exits, the error
+  propagates and the transaction stays open. It is up to the caller to roll it back.
+
   It will also release the lock in the Repo connection, allowing other processes to grab it.
+
+  `commit/0` will return an error tuple when:
+  - There is no open transaction (`:not_in_transaction`).
+  - Capture mode is enabled and some changes couldn't be captured (`:capture_failed`).
+
+  Once this function is called, the transaction is over and the connection released. In the event of
+  an error, the transaction will be rolled back.
   """
   def commit do
-    :ok = Repo.commit(get_pid!())
-    delete_env()
-    :ok
+    state = LocalState.get_current_context!()
+
+    # Run before_commit hooks
+    hooks_payload = before_commit(state)
+
+    # Commit
+    case Repo.commit(state.repo_pid) do
+      :ok ->
+        # Release the connection and remove current context
+        delete_env()
+
+        # Run after_commit hooks
+        after_commit(hooks_payload)
+        :ok
+
+      {:error, _} = error ->
+        # Release the connection on error too, which will trigger a rollback
+        delete_env()
+        error
+    end
   end
+
+  # Reads, and writes begun with `hooks: false`
+  defp before_commit(%{hooks?: false}), do: nil
+
+  defp before_commit(state) do
+    payload = %{
+      context: state.context,
+      shard_id: state.shard_id,
+      capture?: state.capture?,
+      changes: state.changes |> Enum.reverse() |> List.flatten(),
+      assigns: state.assigns
+    }
+
+    # Hook writes are not captured
+    LocalState.disable_capture()
+
+    Hooks.run(:before_commit, payload)
+
+    # Carry along any new assigns added by the before_commit hook
+    %{payload | assigns: LocalState.get_current_context!().assigns}
+  end
+
+  defp after_commit(nil), do: :ok
+  defp after_commit(payload), do: Hooks.run(:after_commit, payload)
 
   @doc """
   Rolls back a transaction.
@@ -72,6 +134,31 @@ defmodule Feeb.DB do
     :ok = Repo.rollback(get_pid!())
     delete_env()
     :ok
+  end
+
+  @doc """
+  Stores `key: value` in the `assigns` accumulator of the current write transaction. It is relayed
+  to commit hooks and dropped on commit or rollback.
+
+  Raises `Feeb.DB.NoWriteTransactionError` if outside a write transaction.
+  """
+  def assign(key, value) do
+    case LocalState.get_current_context() do
+      %{access_type: :write} -> LocalState.put_assign(key, value)
+      _ -> raise Feeb.DB.NoWriteTransactionError
+    end
+  end
+
+  @doc """
+  Returns the assigns for the current transaction.
+
+  Raises `Feeb.DB.NoWriteTransactionError` if outside a write transaction.
+  """
+  def assigns do
+    case LocalState.get_current_context() do
+      %{access_type: :write, assigns: assigns} -> assigns
+      _ -> raise Feeb.DB.NoWriteTransactionError
+    end
   end
 
   ##################################################################################################
@@ -266,12 +353,12 @@ defmodule Feeb.DB do
   # Private
   ##################################################################################################
 
-  defp setup_env(context, shard_id, type, opts) when type in [:write, :read] do
+  defp setup_env(context, shard_id, type, opts, flags) when type in [:write, :read] do
     # TODO: shard-aware telemetry
     {:ok, manager_pid} = Repo.Manager.Registry.fetch_or_create(context, shard_id)
     {:ok, repo_pid} = Repo.Manager.fetch_connection(manager_pid, type, opts)
 
-    LocalState.add_context(context, shard_id, {manager_pid, repo_pid, type})
+    LocalState.add_context(context, shard_id, {manager_pid, repo_pid, type}, flags)
   end
 
   defp delete_env do

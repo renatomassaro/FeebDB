@@ -10,20 +10,24 @@ defmodule Feeb.DB.LocalState do
   @typep shard_id :: integer()
   @typep access_type :: :read | :write
 
-  @typep entry :: %{
-           context: context,
-           shard_id: shard_id,
-           manager_pid: pid(),
-           repo_pid: pid(),
-           access_type: access_type
-         }
+  # `context`, `shard_id`, `access_type` and `capture?` are public (see `Feeb.DB.Hooks`)
+  @type entry :: %{
+          context: context,
+          shard_id: shard_id,
+          manager_pid: pid(),
+          repo_pid: pid(),
+          access_type: access_type,
+          capture?: boolean(),
+          hooks?: boolean(),
+          changes: [[map()]],
+          assigns: map()
+        }
 
   @doc """
   Creates a new context.
   """
-  @spec add_context(context, shard_id, {pid(), pid(), access_type}) ::
-          :ok
-  def add_context(context, shard_id, {manager_pid, repo_pid, access_type}) do
+  @spec add_context(context, shard_id, {pid(), pid(), access_type}, keyword()) :: :ok
+  def add_context(context, shard_id, {manager_pid, repo_pid, access_type}, flags \\ []) do
     true = is_pid(manager_pid)
     true = is_pid(repo_pid)
     true = access_type in [:read, :write]
@@ -33,11 +37,38 @@ defmodule Feeb.DB.LocalState do
       shard_id: shard_id,
       manager_pid: manager_pid,
       repo_pid: repo_pid,
-      access_type: access_type
+      access_type: access_type,
+      capture?: Keyword.get(flags, :capture?, false),
+      hooks?: Keyword.get(flags, :hooks?, false),
+      changes: [],
+      assigns: %{}
     }
 
     Process.put(:feebdb_contexts, Stack.push(contexts(), state))
   end
+
+  @doc """
+  Records the changes of one write query in the current context.
+  """
+  @spec add_changes([map()]) :: :ok
+  def add_changes([]), do: :ok
+
+  def add_changes(changes),
+    do: update_current_context(&%{&1 | changes: [changes | &1.changes]})
+
+  @doc """
+  Set a new assign to the current context.
+  """
+  @spec put_assign(term(), term()) :: :ok
+  def put_assign(key, value),
+    do: update_current_context(&%{&1 | assigns: Map.put(&1.assigns, key, value)})
+
+  @doc """
+  Stops capturing changes in the current context.
+  """
+  @spec disable_capture() :: :ok
+  def disable_capture,
+    do: update_current_context(&%{&1 | capture?: false})
 
   @doc """
   Sets the current context to be the given one.
@@ -92,6 +123,12 @@ defmodule Feeb.DB.LocalState do
   @spec count_open_contexts() :: integer
   def count_open_contexts,
     do: Stack.size(contexts())
+
+  defp update_current_context(fun) do
+    {:ok, {stack, entry}} = Stack.pop(contexts())
+    Process.put(:feebdb_contexts, Stack.push(stack, fun.(entry)))
+    :ok
+  end
 
   defp context_exists?({context, shard_id}) do
     Stack.any?(contexts(), fn %{context: c, shard_id: s} -> c == context and s == shard_id end)

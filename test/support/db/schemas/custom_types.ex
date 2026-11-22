@@ -6,6 +6,8 @@ defmodule Sample.CustomTypes do
   @context :test
   @table :custom_types
 
+  @primary_keys nil
+
   @schema [
     {:typed_id, TypedID}
   ]
